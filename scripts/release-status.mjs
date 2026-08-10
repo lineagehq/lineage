@@ -64,7 +64,7 @@ printResult('isolated runtimes', run(process.execPath, ['dist/cli/lineage-channe
 printResult('checkout dev', run('npm', ['run', '--silent', 'lineage:dev', '--', '--version']));
 printResult('GitHub plugin assets', run('gh', [
   'release', 'view', `v${packageInfo.version}`,
-  '--repo', 'mean-weasel/lineage',
+  '--repo', 'lineagehq/lineage',
   '--json', 'assets',
 ]));
 
@@ -72,7 +72,7 @@ const runs = run('gh', [
   'run',
   'list',
   '--repo',
-  'mean-weasel/lineage',
+  'lineagehq/lineage',
   '--workflow',
   'Release',
   '--limit',

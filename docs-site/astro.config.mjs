@@ -13,12 +13,12 @@ export default defineConfig({
     starlight({
       description: 'How to evaluate, use, operate, and integrate Lineage.',
       editLink: {
-        baseUrl: 'https://github.com/mean-weasel/lineage/edit/main/docs-site/',
+        baseUrl: 'https://github.com/lineagehq/lineage/edit/main/docs-site/',
       },
       lastUpdated: true,
       social: [
         {
-          href: 'https://github.com/mean-weasel/lineage',
+          href: 'https://github.com/lineagehq/lineage',
           icon: 'github',
           label: 'GitHub',
         },

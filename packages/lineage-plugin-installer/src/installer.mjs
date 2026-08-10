@@ -7,7 +7,7 @@ import path from "node:path";
 
 export const LINEAGE_PACKAGE = "@mean-weasel/lineage";
 export const PLUGIN_INSTALLER_PACKAGE = "@mean-weasel/lineage-plugin-installer";
-export const DEFAULT_GITHUB_REPO = "mean-weasel/lineage";
+export const DEFAULT_GITHUB_REPO = "lineagehq/lineage";
 export const PLUGIN_ARTIFACT_NAME = "lineage-codex-plugin";
 export const PLUGIN_MANIFEST_PATH = ".codex-plugin/plugin.json";
 export const CODEX_MARKETPLACE_NAME = "lineage";

@@ -34,8 +34,8 @@ describe('AboutLineageDialog', () => {
     expect(dialog().textContent).toContain('about-dialog-dev');
     expect(dialog().textContent).toContain('1234567890');
     expect(dialog().textContent).not.toContain('/private/');
-    expect(link('GitHub repository')?.href).toBe('https://github.com/mean-weasel/lineage');
-    expect(link('Documentation')?.href).toBe('https://mean-weasel.github.io/lineage/docs/');
+    expect(link('GitHub repository')?.href).toBe('https://github.com/lineagehq/lineage');
+    expect(link('Documentation')?.href).toBe('https://lineagehq.github.io/lineage/docs/');
   });
 
   it('marks runtime values unavailable when identity cannot be trusted', () => {

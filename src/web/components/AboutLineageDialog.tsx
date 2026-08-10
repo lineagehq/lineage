@@ -20,8 +20,8 @@ import { copyToClipboard } from '../clipboard';
 import { lineageReleaseInfo } from '../releaseInfo';
 import './AboutLineageDialog.css';
 
-const repositoryUrl = 'https://github.com/mean-weasel/lineage';
-const documentationUrl = 'https://mean-weasel.github.io/lineage/docs/';
+const repositoryUrl = 'https://github.com/lineagehq/lineage';
+const documentationUrl = 'https://lineagehq.github.io/lineage/docs/';
 
 export function AboutLineageDialog({
   onClose,

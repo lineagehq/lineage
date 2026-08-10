@@ -8,7 +8,7 @@ iteration, relationship, selection, and annotation in one local-first record:
 visual enough for humans to review and direct, and precise enough for agents to
 retrieve through the CLI and continue accurately.
 
-[See the landing page](https://mean-weasel.github.io/lineage/) ·
+[See the landing page](https://lineagehq.github.io/lineage/) ·
 [Install Lineage](#first-run) ·
 [Use the Codex plugin](#codex-plugin) ·
 [Develop locally](#local-development)
@@ -82,7 +82,7 @@ This is the shortest source-development path with hot reload and isolated
 development data:
 
 ```bash
-git clone https://github.com/mean-weasel/lineage.git
+git clone https://github.com/lineagehq/lineage.git
 cd lineage
 npm ci &&
 npm run lineage:dev -- runtime doctor --json &&
@@ -836,7 +836,7 @@ The package intentionally includes three public-safe synthetic Swissifier re-rol
 To hydrate the Swissifier demo with real images, expand **Demo/QA** in the
 Canvas context panel and use **Download rich images**. Lineage downloads
 `swissifier-rich-demo-v1.tar.gz` from the [v0.1.2 GitHub
-release](https://github.com/mean-weasel/lineage/releases/tag/v0.1.2), verifies
+release](https://github.com/lineagehq/lineage/releases/tag/v0.1.2), verifies
 the archive checksum, safely unpacks the PNGs into local scratch storage, and
 then verifies each PNG checksum before loading the rich demo.
 

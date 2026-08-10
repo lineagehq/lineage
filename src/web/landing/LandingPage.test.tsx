@@ -57,7 +57,7 @@ describe('Lineage landing page', () => {
   it('links to the public repository and exposes the documented install command', () => {
     const html = renderToStaticMarkup(<LandingPage />);
 
-    expect(html).toContain('https://github.com/mean-weasel/lineage');
+    expect(html).toContain('https://github.com/lineagehq/lineage');
     expect(html).toContain('npm install -g @mean-weasel/lineage@latest');
     expect(html).toContain('lineage-channel install stable');
     expect(html).toContain('lineage-stable runtime doctor --json');
@@ -66,7 +66,7 @@ describe('Lineage landing page', () => {
     expect(html).toContain('lineage-stable db info --profile team-production --json');
     expect(html).toContain('lineage-stable start --profile team-production');
     expect(html).toContain('Copy first-run commands');
-    expect(html).toContain('https://github.com/mean-weasel/lineage#first-run');
+    expect(html).toContain('https://github.com/lineagehq/lineage#first-run');
     expect(html).toContain('Documentation');
     expect(html).toContain('href="/docs/"');
     expect(html).toContain('Browse Lineage documentation');

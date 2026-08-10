@@ -37,7 +37,7 @@ Publish a new package version with:
 
 ```bash
 gh workflow run lineage-plugin-installer-publish.yml \
-  --repo mean-weasel/lineage \
+  --repo lineagehq/lineage \
   -f tag=next \
   -f dry_run=true
 ```
@@ -46,7 +46,7 @@ Move an existing published version between npm dist-tags with:
 
 ```bash
 gh workflow run lineage-plugin-installer-promote.yml \
-  --repo mean-weasel/lineage \
+  --repo lineagehq/lineage \
   -f tag=latest \
   -f dry_run=true
 ```
@@ -106,7 +106,7 @@ lineage-plugin-installer install --version "$LINEAGE_VERSION" \
 Future GitHub release download, once release artifacts exist:
 
 ```bash
-lineage-plugin-installer install --channel latest --github-repo mean-weasel/lineage --dry-run --json
+lineage-plugin-installer install --channel latest --github-repo lineagehq/lineage --dry-run --json
 ```
 
 By default, `latest` resolves with:
@@ -118,8 +118,8 @@ npm view @mean-weasel/lineage@latest version --json
 Then the installer derives:
 
 ```text
-https://github.com/mean-weasel/lineage/releases/download/v<VERSION>/lineage-codex-plugin-<VERSION>.tgz
-https://github.com/mean-weasel/lineage/releases/download/v<VERSION>/lineage-codex-plugin-<VERSION>.tgz.sha256
+https://github.com/lineagehq/lineage/releases/download/v<VERSION>/lineage-codex-plugin-<VERSION>.tgz
+https://github.com/lineagehq/lineage/releases/download/v<VERSION>/lineage-codex-plugin-<VERSION>.tgz.sha256
 ```
 
 The installer downloads both files, verifies the checksum, extracts the artifact

@@ -56,7 +56,7 @@ export function LandingPage() {
           <a href={documentationHref}>Documentation</a>
           <a href="#install">Install</a>
         </nav>
-        <a className="nav-cta" href="https://github.com/mean-weasel/lineage" rel="noreferrer" target="_blank">
+        <a className="nav-cta" href="https://github.com/lineagehq/lineage" rel="noreferrer" target="_blank">
           View on GitHub <ArrowDownRight aria-hidden="true" size={16} />
         </a>
       </header>
@@ -161,7 +161,7 @@ export function LandingPage() {
                   {copied ? 'Copied' : 'Copy first-run commands'}
                 </button>
               </div>
-              <a className="install-guide-link" href="https://github.com/mean-weasel/lineage#first-run" rel="noreferrer" target="_blank">
+              <a className="install-guide-link" href="https://github.com/lineagehq/lineage#first-run" rel="noreferrer" target="_blank">
                 Read the complete first-run guide <ArrowDownRight aria-hidden="true" size={15} />
               </a>
               <a className="install-guide-link" href={documentationHref}>
@@ -173,7 +173,7 @@ export function LandingPage() {
                 <span>Codex plugin</span>
                 <span>CLI access</span>
               </div>
-              <a className="primary-cta dark" href="https://github.com/mean-weasel/lineage" rel="noreferrer" target="_blank">
+              <a className="primary-cta dark" href="https://github.com/lineagehq/lineage" rel="noreferrer" target="_blank">
                 Explore Lineage on GitHub <ArrowDownRight aria-hidden="true" size={18} />
               </a>
             </div>
@@ -187,7 +187,7 @@ export function LandingPage() {
           <span>LINEAGE</span>
         </a>
         <p>The shared visual workspace for humans and agents.</p>
-        <a href="https://github.com/mean-weasel/lineage" rel="noreferrer" target="_blank">GitHub <ArrowDownRight aria-hidden="true" size={14} /></a>
+        <a href="https://github.com/lineagehq/lineage" rel="noreferrer" target="_blank">GitHub <ArrowDownRight aria-hidden="true" size={14} /></a>
       </footer>
     </div>
   );

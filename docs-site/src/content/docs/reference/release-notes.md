@@ -4,7 +4,7 @@ description: Find package changes and understand how documentation freshness is 
 ---
 
 Package release notes live in the repository
-[CHANGELOG](https://github.com/mean-weasel/lineage/blob/main/CHANGELOG.md).
+[CHANGELOG](https://github.com/lineagehq/lineage/blob/main/CHANGELOG.md).
 
 Every release must review documentation impact. A central review receipt records
 the exact package version and whether pages were updated or remained accurate.

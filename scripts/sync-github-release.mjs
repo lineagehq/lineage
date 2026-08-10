@@ -55,7 +55,7 @@ function releaseNotes(changelog, version) {
   return match?.[2]?.trim();
 }
 
-const repo = readOption('--repo', process.env.GITHUB_REPOSITORY || 'mean-weasel/lineage');
+const repo = readOption('--repo', process.env.GITHUB_REPOSITORY || 'lineagehq/lineage');
 const channel = readOption('--channel', 'latest');
 if (channel !== 'latest' && channel !== 'next') throw new Error(`Unsupported release channel: ${channel}`);
 const target = readOption('--target', process.env.GITHUB_SHA || 'HEAD');

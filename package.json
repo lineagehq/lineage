@@ -104,12 +104,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/mean-weasel/lineage.git"
+    "url": "git+ssh://git@github.com/lineagehq/lineage.git"
   },
   "bugs": {
-    "url": "https://github.com/mean-weasel/lineage/issues"
+    "url": "https://github.com/lineagehq/lineage/issues"
   },
-  "homepage": "https://github.com/mean-weasel/lineage#readme",
+  "homepage": "https://github.com/lineagehq/lineage#readme",
   "publishConfig": {
     "access": "public"
   }

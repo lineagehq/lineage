@@ -289,7 +289,7 @@ necessary. Then perform every source command through the wrapper:
 
 ```bash
 run_lineage_dev_dogfood git clone \
-  https://github.com/mean-weasel/lineage.git \
+  https://github.com/lineagehq/lineage.git \
   "$DEV_DOGFOOD_ROOT/lineage"
 cd "$DEV_DOGFOOD_ROOT/lineage"
 run_lineage_dev_dogfood npm ci

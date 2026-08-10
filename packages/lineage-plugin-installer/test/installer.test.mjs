@@ -214,9 +214,9 @@ test("parseChecksumText accepts sha256 files with filenames", () => {
 test("releaseArtifactUrls derives GitHub release artifact URLs", () => {
   assert.deepEqual(releaseArtifactUrls({ version: "0.1.11" }), {
     artifactUrl:
-      "https://github.com/mean-weasel/lineage/releases/download/v0.1.11/lineage-codex-plugin-0.1.11.tgz",
+      "https://github.com/lineagehq/lineage/releases/download/v0.1.11/lineage-codex-plugin-0.1.11.tgz",
     checksumUrl:
-      "https://github.com/mean-weasel/lineage/releases/download/v0.1.11/lineage-codex-plugin-0.1.11.tgz.sha256",
+      "https://github.com/lineagehq/lineage/releases/download/v0.1.11/lineage-codex-plugin-0.1.11.tgz.sha256",
   });
 });
 

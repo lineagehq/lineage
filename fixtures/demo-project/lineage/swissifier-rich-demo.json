@@ -10,7 +10,7 @@
     "source_hint": "Set LINEAGE_SWISSIFIER_MEDIA_DIR to an unpacked Swissifier media pack containing these PNG filenames, then restore media from the demo seed menu.",
     "download": {
       "file": "swissifier-rich-demo-v1.tar.gz",
-      "url": "https://github.com/mean-weasel/lineage/releases/download/v0.1.2/swissifier-rich-demo-v1.tar.gz",
+      "url": "https://github.com/lineagehq/lineage/releases/download/v0.1.2/swissifier-rich-demo-v1.tar.gz",
       "sha256": "24edc5307d0932ddc8a151c6a8c1001a08c45075e3ae198082038c44519be0de",
       "size_bytes": 31910759
     }

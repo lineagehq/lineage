@@ -1244,8 +1244,8 @@ describe('lineage CLI handoff commands', () => {
       '--actor', 'agent:cli',
       '--notes', 'Prepare channel copy',
       '--json',
-    ]) as { active: boolean; dryRun?: boolean };
-    expect(dryRun).toMatchObject({ active: true, dryRun: true, ok: true });
+    ]) as { active: boolean; dryRun?: boolean; schema_version?: string };
+    expect(dryRun).toMatchObject({ active: true, dryRun: true, ok: true, schema_version: 'lineage.social_mark_mutation.v1' });
 
     const empty = runLineageDataCommand('social', [
       'list',
@@ -1255,7 +1255,7 @@ describe('lineage CLI handoff commands', () => {
     ]) as { marks: unknown[] };
     expect(empty.marks).toEqual([]);
 
-    runLineageDataCommand('social', [
+    const marked = runLineageDataCommand('social', [
       'mark',
       '--project', defaultProject,
       '--root', fixtureRootAssetId,
@@ -1264,7 +1264,8 @@ describe('lineage CLI handoff commands', () => {
       '--notes', 'Prepare channel copy',
       '--confirm-write',
       '--json',
-    ]);
+    ]) as { schema_version?: string };
+    expect(marked.schema_version).toBe('lineage.social_mark_mutation.v1');
     const listed = runLineageDataCommand('social', [
       'list',
       '--project', defaultProject,
@@ -1279,7 +1280,7 @@ describe('lineage CLI handoff commands', () => {
       }),
     ]);
 
-    runLineageDataCommand('social', [
+    const unmarked = runLineageDataCommand('social', [
       'unmark',
       '--project', defaultProject,
       '--root', fixtureRootAssetId,
@@ -1287,7 +1288,8 @@ describe('lineage CLI handoff commands', () => {
       '--actor', 'agent:cli',
       '--confirm-write',
       '--json',
-    ]);
+    ]) as { schema_version?: string };
+    expect(unmarked.schema_version).toBe('lineage.social_mark_mutation.v1');
     const finalList = runLineageDataCommand('social', [
       'list',
       '--project', defaultProject,

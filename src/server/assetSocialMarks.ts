@@ -7,6 +7,7 @@ import type {
   AssetSocialMarkMutationResponse,
   AssetSocialMarksResponse,
 } from '../shared/socialMarkTypes';
+import { SOCIAL_MARK_NOTES_MAX_CODE_POINTS } from '../shared/socialMarkTypes';
 import type { LineageNode, LineageSnapshot } from '../shared/types';
 import { repoRoot } from './assetCore';
 import { getLineageSnapshot, LineageError } from './assetLineage';
@@ -91,6 +92,15 @@ function requireActor(actor: string, field: 'markedBy' | 'unmarkedBy'): string {
   return normalized;
 }
 
+function normalizeNotes(notes?: string): string | undefined {
+  if (notes === undefined) return undefined;
+  const trimmed = notes.trim();
+  if ([...trimmed].length > SOCIAL_MARK_NOTES_MAX_CODE_POINTS) {
+    throw new LineageError(`Social mark notes must be at most ${SOCIAL_MARK_NOTES_MAX_CODE_POINTS} Unicode code points after trimming`);
+  }
+  return trimmed || undefined;
+}
+
 function socialMarkId(project: string, rootAssetId: string, assetId: string): string {
   return `${project}:${rootAssetId}:social:${assetId}`;
 }
@@ -121,6 +131,7 @@ export function markAssetSocial(project: string, fields: MarkAssetSocialFields):
   const snapshot = requireCanonicalSnapshot(project, fields.rootAssetId);
   const node = resolveVisibleNode(snapshot, fields.asset);
   const markedBy = requireActor(fields.markedBy, 'markedBy');
+  const notes = normalizeNotes(fields.notes);
   requireLineageWorkspaceClaimForWrite({
     channel: rootChannel(snapshot),
     claimToken: fields.claimToken,
@@ -138,7 +149,7 @@ export function markAssetSocial(project: string, fields: MarkAssetSocialFields):
     id: socialMarkId(project, fields.rootAssetId, node.asset_id),
     marked_at: timestamp,
     marked_by: markedBy,
-    notes: fields.notes?.trim() || undefined,
+    notes,
     project_id: project,
     root_asset_id: fields.rootAssetId,
     updated_at: timestamp,

@@ -249,6 +249,31 @@ describe('AssetNode', () => {
     expect(onOpenHistory).not.toHaveBeenCalled();
   });
 
+  it('suppresses the Social shortcut in editable, modifier, and modal interactions', () => {
+    const onToggleSocial = vi.fn();
+    renderNode({ onToggleSocial });
+    const node = container!.querySelector<HTMLElement>('.lineage-node')!;
+    const input = document.createElement('input');
+    const editable = document.createElement('div');
+    editable.contentEditable = 'true';
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    const modalInput = document.createElement('input');
+    dialog.appendChild(modalInput);
+    document.body.append(input, editable, dialog);
+
+    act(() => input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 's' })));
+    act(() => editable.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 's' })));
+    act(() => modalInput.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 's' })));
+    act(() => node.dispatchEvent(new KeyboardEvent('keydown', { altKey: true, bubbles: true, key: 's' })));
+    act(() => node.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 's', shiftKey: true })));
+
+    expect(onToggleSocial).not.toHaveBeenCalled();
+    input.remove();
+    editable.remove();
+    dialog.remove();
+  });
+
   it('shows a persistent Social badge for an active mark', () => {
     renderNode({
       social_mark: {

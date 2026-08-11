@@ -27,7 +27,7 @@ import {
   markLineageRerollRequest,
 } from '../server/assetLineage';
 import { getLineageBrief, linkSelectedLineageChild } from '../server/assetLineageHandoff';
-import { listAssetSocialMarks, markAssetSocial, unmarkAssetSocial } from '../server/assetSocialMarks';
+import { listAssetSocialMarks, markAssetSocial, unmarkAssetSocial } from '../server/social/socialMarks';
 import {
   addLineageTaskComment,
   cancelLineageTask,

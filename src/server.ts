@@ -23,7 +23,7 @@ import {
 } from './server/assetLineage';
 import { getLineageBrief, linkSelectedLineageChild } from './server/assetLineageHandoff';
 import { removeLineageNode } from './server/assetLineageRemove';
-import { registerAssetSocialMarkRoutes } from './server/assetSocialMarks';
+import { registerSocialMarkRoutes } from './server/social/socialRoutes';
 import { isLineageTaskError } from './server/assetLineageTasks';
 import { isLineageWorkspaceError } from './server/assetLineageWorkspaces';
 import { lineageDb } from './server/assetLineageDb';
@@ -211,7 +211,7 @@ app.get(
 
 registerLineageWorkspaceRoutes(app, projectFrom, asyncRoute);
 registerLineageTaskRoutes(app, projectFrom, asyncRoute);
-registerAssetSocialMarkRoutes(app, projectFrom, asyncRoute);
+registerSocialMarkRoutes(app, projectFrom, asyncRoute);
 
 app.get('/api/lineage/:rootAssetId/rerolls', asyncRoute((req, res) => {
   res.json(listLineageRerollRequests(projectFrom(req), req.params.rootAssetId));

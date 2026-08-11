@@ -1,4 +1,4 @@
-import type { AssetSocialMark } from './socialMarkTypes';
+import type { AssetSocialMark } from './socialTypes';
 
 type AssetStatus = 'planned' | 'working' | 'approved' | 'published' | 'archived';
 export type AssetContentType = 'image' | 'video' | 'gif' | 'audio' | 'doc' | 'other';

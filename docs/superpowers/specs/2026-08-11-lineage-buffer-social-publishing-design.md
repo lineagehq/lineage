@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-11
 
-**Status:** Approved umbrella design
+**Status:** Approved umbrella design, revised after independent review
 
 ## Summary
 
@@ -89,6 +89,9 @@ does not depend on finishing the entire integration platform.
   variants without a verified external ID are eligible for retry.
 - **Post-schedule edits:** Local edits create visible drift. Updating Buffer
   requires a confirmed diff.
+- **Cancellation:** Only an unsent post with a currently permitted Buffer delete
+  action can be cancelled externally. A published delivery may be archived
+  locally but is never represented as removed from the social network.
 - **Sync cadence:** Channel and linked-post synchronization are manual only.
 - **Performance:** Metrics are timestamped evidence. Users may explicitly branch
   or re-roll from a performer; metrics do not create work automatically.
@@ -96,9 +99,15 @@ does not depend on finishing the entire integration platform.
   A dedicated Social workspace is a later operational view over the same data.
 - **Channel scope:** The first complete scheduling release supports
   single-image posts across every connected Buffer service that exposes a
-  compatible image-post capability. Multi-image carousels remain deferred.
+  compatible image-post capability in Lineage's versioned support matrix.
+  Multi-image carousels remain deferred.
 - **Notification publishing:** Notification-only post types are available only
   through an explicit per-variant choice and are never labeled automatic.
+- **Scheduling modes:** Release 2 supports `customScheduled` and `addToQueue`.
+  A custom schedule shows an exact zoned time. Queue scheduling shows Buffer's
+  queue semantics and never promises an exact time. `shareNext` and `shareNow`
+  are deferred; immediate publishing will require a separately designed,
+  stronger confirmation.
 - **Hashtags:** Hashtags are an ordered structured set per variant, with an
   explicit caption or first-comment placement where supported.
 - **Alt text:** AI may draft alt text, but a human must review it before
@@ -154,6 +163,7 @@ delivery boundary.
 | `social_publish_renditions` | Frozen asset bytes, checksum, MIME type, dimensions, upload location, and receipt |
 | `social_delivery_operations` | One confirmed multi-variant scheduling command, actor, preview hash, and audit timestamps |
 | `social_deliveries` | Per-variant provider post ID, projected revision, rendition, state, URL, timestamps, normalized error, and safe receipt |
+| `social_delivery_attempts` | Append-only create/edit/delete attempts with request hash, timestamps, process classification, verification evidence, and supersession linkage |
 | `social_sync_runs` | Manual sync scope, progress, counts, warnings, and failures |
 | `social_metric_snapshots` | Delivery, normalized metric type, value, unit, provider freshness, and retrieval time |
 | `buffer_connections` | Project-to-organization identity, credential reference, timezone, fingerprint, and channel-sync time |
@@ -163,6 +173,14 @@ delivery boundary.
 
 - Work items, variants, operations, and deliveries use immutable IDs rather than
   mutable titles.
+- Promotion permits multiple campaign uses of one canvas node but only one
+  active work item per `(project_id, root_asset_id, source_asset_id,
+  campaign_key)`. Missing campaign input is normalized to the explicit key
+  `default` rather than SQL `null`.
+- The initial releases permit only one active variant per Buffer channel within
+  a work item. Reposting to the same channel requires a cloned or separately
+  keyed work item, preventing an accidental duplicate from appearing as an
+  ordinary variant edit.
 - Editing a variant creates a new immutable revision; it does not rewrite the
   revision referenced by an existing delivery.
 - A normalized revision hash covers final text, structured hashtags and
@@ -172,6 +190,8 @@ delivery boundary.
   to Buffer.
 - A successful external Buffer post ID is unique within its connection and is
   never eligible for another create attempt.
+- Delivery attempts are immutable. A retry creates a new attempt linked to the
+  attempt it supersedes; it never rewrites timeout or verification evidence.
 - Metrics are append-only snapshots rather than mutable fields on a canvas
   node.
 - Provider receipts are scrubbed, size-bounded, and separated from normalized
@@ -187,6 +207,22 @@ SQLite and are addressed through a credential reference. The stored connection
 contains only safe organization identity, timezone, code/schema compatibility,
 provider fingerprint, health state, and sync timestamps.
 
+Lineage owns the Buffer runtime used for provider operations. It installs an
+exact, lockfile-pinned `@bufferapp/cli` dependency and invokes that verified
+package path rather than a `PATH`-resolved global binary. The connection
+fingerprint includes the CLI version and relevant command-schema hashes. A
+schema mismatch fails closed until Lineage's compatibility fixtures pass and
+the pinned dependency is deliberately updated.
+
+For each invocation, Lineage resolves the project's approved credential
+reference, injects `BUFFER_API_KEY` into a scrubbed child-process environment,
+and passes the configured organization ID explicitly in every applicable JSON
+input. Buffer configuration lookup runs against an isolated, Lineage-owned
+configuration root so no repository or user-global Buffer setting can fill a
+missing value. Existing `LINEAGE_SCHEDULER_*` detection is migrated into this
+connection contract rather than remaining a second, independent credential
+path.
+
 Manual channel synchronization lists channels for the configured organization
 and fetches detailed metadata where required. The catalog records:
 
@@ -197,11 +233,21 @@ and fetches detailed metadata where required. The catalog records:
 - allowed actions and automatic or notification publishing support;
 - image post types, required metadata, asset constraints, and scheduling modes;
 - network-specific requirements such as Pinterest board identities;
-- the Buffer schema or CLI version from which capabilities were derived.
+- the Buffer schema or CLI version from which capabilities were derived; and
+- a Lineage capability-registry version and support-matrix entry.
 
 Disconnected, locked, or unsupported channels remain visible in the composer
 with actionable explanations. The scheduler never guesses channel IDs or moves
 an ID between organizations.
+
+Buffer channel responses are evidence, not a complete capability declaration.
+Lineage therefore owns a versioned, test-backed support matrix keyed by Buffer
+CLI/schema version, service, post type, and scheduling method. Release 1 ships
+the minimal registry needed to render and validate synchronized channels.
+Release 2 adds the tested Instagram and LinkedIn single-image compilers. Release
+3 expands the matrix service by service; completion is measured against the
+explicit matrix shipped by that Lineage version, not the open-ended phrase
+"every image channel."
 
 ## Canvas Side-Panel Workflow
 
@@ -217,8 +263,9 @@ creative lineage. The panel follows seven steps.
    suggestions, optionally run cited research, edit the chosen copy, choose
    hashtag placement, and review alt text.
 4. **Set delivery:** choose automatic or explicitly labeled notification
-   publishing and a supported Buffer scheduling mode. Display every time with
-   its timezone.
+   publishing and a supported Buffer scheduling mode. `customScheduled`
+   displays an exact zoned time. `addToQueue` displays the applicable Buffer
+   queue and schedule but states that the eventual time may move.
 5. **Preflight:** validate copy and hashtag rules, required provider metadata,
    channel schedule and posting limits, media type and dimensions, publishable
    upload, current channel health, and connection identity.
@@ -230,31 +277,31 @@ creative lineage. The panel follows seven steps.
 
 ## Workflow States
 
-Variants transition through these normalized states:
+Editorial and provider lifecycles are separate.
 
 ```text
-draft
-  -> needs_review
-  -> ready
-  -> scheduling
-     -> scheduled
-     -> failed
-     -> verification_required
-  -> published
-  -> drifted
-  -> attention
-  -> cancelled
-  -> archived
+Variant editorial state:
+draft -> needs_review -> ready -> archived
+
+Delivery lifecycle:
+pending -> creating -> verification_required
+                    -> scheduled -> sending -> published
+                    -> failed
+pending|scheduled -> cancelled (only when the provider action permits it)
+scheduled|published -> external_missing (after manual sync evidence)
 ```
 
-`verification_required` is not a failure eligible for automatic retry. It
-means Buffer may have accepted a non-idempotent create even though Lineage did
-not receive a usable response. `attention` covers provider errors, a missing
-linked post, or a state that requires human resolution.
+`verification_required` is not eligible for automatic retry. It means Buffer
+may have accepted a non-idempotent create even though Lineage did not receive a
+usable response. Drift, stale sync, partial completion, and attention are
+computed flags rather than mutually exclusive lifecycle states. A published
+delivery may therefore also be drifted, and a historical cancelled delivery
+does not make the current variant cancelled.
 
-Work-item status is derived from its variants. A work item may therefore be
-partially scheduled or partially published. Successful siblings are never
-downgraded because another variant failed.
+Work-item summaries are derived from the editorial states, current delivery
+lifecycles, and computed flags of their variants. A work item may be partially
+scheduled or partially published. Successful siblings and historical
+deliveries are never downgraded because another variant or replacement failed.
 
 ## Integration Services
 
@@ -282,11 +329,28 @@ immutable publish rendition, uploads through a provider-neutral adapter,
 verifies checksum and safe metadata, and returns a durable upload receipt. S3
 is the first adapter, but the domain contract does not depend on S3 fields.
 
+The first production media implementation uses an unguessable, read-only,
+non-listable HTTPS object URL whose bytes are immutable. Ordinary S3 presigned
+URLs are not accepted because their maximum practical lifetime may be shorter
+than a future schedule and provider retry window. The object remains available
+through publication plus 30 days by default. Because synchronization is manual,
+an unobserved publication date results in indefinite retention rather than an
+inferred cleanup deadline. A cancelled-before-send or failed unreferenced
+rendition remains available for seven days. Replacements hold independent
+references, and cleanup is reference-counted so one delivery cannot remove
+media still used by another.
+
+Earlier deletion is allowed only after an acceptance-tested Buffer response or
+readback field proves that Buffer has ingested and no longer dereferences the
+source URL. Until that proof exists, retention time is the safety boundary. The
+current local-fallback S3 adapter does not satisfy this contract and must not be
+reported as a production publisher.
+
 ### Payload compiler
 
 Combines one immutable variant revision, rendition, and synchronized channel
 capability record into the exact Buffer payload. The generated JSON is
-validated against the installed Buffer CLI schema before any external
+validated against the pinned Buffer CLI schema before any external
 mutation. Per-network compilers own required metadata and constraints.
 
 ### Delivery coordinator
@@ -296,12 +360,25 @@ then creates each Buffer post independently. It persists a normalized attempt
 state before and after each provider call, preserving partial success and exact
 recovery scope.
 
+Each active delivery operation has a renewable local lease with owner,
+acquisition time, expiry, and heartbeat. An expired lease never authorizes a
+new create by itself. Recovery first inspects the append-only attempts and
+performs ambiguous-result verification; only then may a human release or
+supersede the operation and confirm a new attempt.
+
 ### Reconciliation service
 
 Manually fetches only deliveries with stored Buffer post IDs. It synchronizes
 provider status, due and sent times, external link, errors, remote content
 fingerprints, and explicitly requested metrics. It records sync progress and
 can resume a project-wide paginated run after interruption.
+
+Release 2 includes narrow provider reads required for scheduling safety and
+recovery: recent-post lookup for ambiguous creates and a fresh post read before
+update or cancellation to verify status and `allowedActions`. These reads write
+only the associated attempt or delivery evidence. Release 4 adds the
+user-facing item/project bulk synchronization, resumable pagination, drift
+views, and metric collection described below.
 
 ## Scheduling and Idempotency
 
@@ -322,10 +399,18 @@ organization and channel using the projected text, schedule, creation window,
 and available media evidence.
 
 - One unique match may be adopted after Lineage records the verification
-  evidence.
+  evidence only when a durable Lineage correlation marker has been
+  acceptance-tested as round-trippable through Buffer. Without that proof, even
+  one candidate requires explicit human adoption.
 - Zero matches permits a separately confirmed retry.
 - Multiple matches require human resolution and expose candidate IDs and safe
   comparison fields.
+
+The payload compiler sets Buffer's `source` field to a stable Lineage marker
+when the pinned schema supports it, but the design does not assume that field is
+readable or unique until the non-production acceptance suite proves it. Text,
+schedule, channel, media, and time-window similarity are candidate evidence,
+not automatic identity.
 
 Lineage never treats an exit code alone as proof that the external mutation did
 or did not occur. A successful variant must have a verified external ID.
@@ -342,10 +427,15 @@ creating the replacement and optionally deleting the original are separate,
 explicitly described external actions. A replacement is linked to the previous
 delivery so history remains navigable.
 
-Cancellation requires confirmation, invokes Buffer deletion, and retains a
-local delivery tombstone and provider receipt. If a manually synchronized
-Buffer post is missing, Lineage marks it `external_missing` under the broader
-`attention` state. It never recreates the post automatically.
+Cancellation requires confirmation and is constrained by the latest Buffer
+status and `allowedActions`. For an unsent post, Lineage may invoke Buffer
+deletion and retain a local delivery tombstone and provider receipt. A sent or
+published delivery cannot be described as cancelled or removed from the social
+network merely because a Buffer record was deleted. Until Buffer exposes and
+Lineage acceptance-tests an explicit network-deletion contract, published
+deliveries may only be archived locally. If a manually synchronized Buffer post
+is missing, Lineage marks its delivery `external_missing` and raises the
+computed `attention` flag. It never recreates the post automatically.
 
 Remote Buffer edits are captured as drift evidence. They never replace the
 Lineage revision. The user may either re-project Lineage through a confirmed
@@ -441,6 +531,24 @@ exact IDs, and canonical recovery commands. Retry commands accept exact
 delivery IDs and refuse deliveries with verified external IDs. Titles may be
 used only when they resolve unambiguously within the exact project and canvas.
 
+### Claim scope
+
+Through Releases 1–4, every Social Work Item is anchored to its source canvas,
+and that canvas workspace claim protects user-authored item, variant, rendition,
+and delivery changes plus every external provider mutation. Read-only
+inspection and provider-evidence reconciliation do not require a claim.
+Reconciliation is serialized, appends provider observations and metrics, may
+update normalized delivery lifecycle evidence, and is forbidden from changing
+Lineage-owned variant revisions or editorial fields. Adopting an ambiguous
+Buffer post is a human-authored identity decision and therefore does require
+the canvas claim.
+
+The dedicated Social workspace in Release 5 must add an explicit
+`social_work_item` claim target and a shared conflict key with the originating
+canvas. It may not create a second ownership path that bypasses an active canvas
+claim. Until that claim type exists, social work without an originating canvas
+is not supported.
+
 ## HTTP API Contract
 
 The API exposes social resources and operations rather than arbitrary Buffer
@@ -483,7 +591,8 @@ return provider credentials or unrestricted raw provider bodies.
 - Concurrent local edit: reject a stale expected revision and return the
   authoritative variant.
 - Concurrent scheduling attempt: use a unique active-operation constraint and
-  return the existing operation.
+  return the existing unexpired operation. For an expired lease, enter recovery
+  and inspect its immutable attempts before allowing release or supersession.
 - Deleted or missing source asset after promotion: preserve the work item and
   block new rendition creation with a repair instruction.
 - Manual sync interruption: preserve the last processed page and offer a resume
@@ -501,9 +610,11 @@ return provider credentials or unrestricted raw provider bodies.
   credentials, private media, or unrestricted provider payloads.
 - Publish renditions are immutable. Upload receipts record checksums and safe
   object identity.
-- Upload retention and cleanup are configurable and occur only after Buffer has
-  safely ingested or published the rendition. Cleanup never invalidates a
-  scheduled post without explicit proof that the URL is no longer needed.
+- Upload retention follows the reference-counted 30-day post-publication and
+  seven-day unreferenced defaults; media with no observed publication time is
+  retained indefinitely while referenced. Earlier cleanup requires
+  acceptance-tested proof that Buffer no longer needs the source URL. Cleanup
+  never invalidates a scheduled post.
 - Research stores short findings and links rather than full copyrighted pages.
 - Fixtures, tests, documentation, packages, and releases use synthetic IDs,
   media, captions, provider responses, and URLs.
@@ -529,11 +640,12 @@ notification delivery with automatic publishing.
 - Unit tests for state transitions, revision hashes, hashtag rendering,
   timezone conversion, channel capabilities, and each image-channel payload
   compiler.
-- Contract tests derived from the installed Buffer CLI schemas so field and enum
-  drift fails visibly.
+- Contract tests derived from the lockfile-pinned Buffer CLI schemas so field,
+  enum, or response-union drift fails visibly.
 - Integration tests using injected Buffer and media runners, temporary named
   profiles and databases, and deterministic safe responses.
-- Failure-injection tests for timeout, lost response, malformed success union,
+- Failure-injection tests for timeout, crash between provider response and local
+  persistence, lost response, malformed success union, expired operation lease,
   rate limits, ambiguous recent-post matches, partial batches, disconnected
   channels, missing remote posts, and unavailable media.
 - Canvas component and browser tests covering promotion, variant composition,
@@ -545,8 +657,9 @@ notification delivery with automatic publishing.
   media, real presigned URLs, captions, and provider payloads do not enter
   public artifacts.
 - A dedicated non-production Buffer organization acceptance run that schedules
-  future synthetic posts, verifies external IDs and rendered content, manually
-  synchronizes them, and explicitly cancels them.
+  future synthetic posts, verifies external IDs, correlation-marker behavior,
+  media availability, and rendered content, manually synchronizes them, and
+  explicitly cancels the still-unsent posts.
 - Repository gates appropriate to a meaningful release, including `npm run ci`,
   `npm run public:readiness`, `npm run package:smoke`,
   `npm run runtime:oracle`, and `npm run e2e`.
@@ -556,7 +669,10 @@ notification delivery with automatic publishing.
 ### Release 1: Social foundation
 
 - Implement the approved canvas Social marks.
-- Add project-scoped Buffer connection identity and manual channel sync.
+- Pin the supported `@bufferapp/cli` runtime, isolate project credentials, and
+  add project-scoped Buffer connection identity and manual channel sync.
+- Add the minimal versioned support matrix and capability registry needed to
+  display and validate synchronized channels.
 - Add Social Work Items, revisions, channel variants, and the canvas side panel.
 - Support manual copy, structured hashtags, reviewed alt text, and validation.
 - Perform no external scheduling.
@@ -564,16 +680,22 @@ notification delivery with automatic publishing.
 ### Release 2: Safe scheduling kernel
 
 - Add immutable publish renditions and the managed media-upload adapter.
-- Add operation records, delivery receipts, preflight, confirmation, and
-  recovery.
+- Add operation leases, append-only delivery attempts, delivery receipts,
+  preflight, confirmation, and recovery.
 - Prove the complete flow with representative Instagram and LinkedIn variants.
-- Add update, cancellation, partial-success handling, and ambiguous-result
-  verification.
+- Support only `customScheduled` and `addToQueue`, with their different timing
+  semantics visible throughout the UI and receipts.
+- Add update, unsent cancellation, partial-success handling, human-confirmed
+  ambiguous-result adoption, and expired-operation recovery.
+- Include targeted `posts list` and `posts get` safety reads for ambiguous-create
+  recovery and fresh update/cancellation authorization. Do not expose bulk
+  synchronization or metrics yet.
 
 ### Release 3: Complete single-image channel support
 
 - Expand through the Buffer capability registry to every connected Buffer
-  service that exposes a compatible single-image post capability.
+  service listed as supported in that Lineage version's tested single-image
+  matrix.
 - Add network-specific metadata such as Pinterest boards, Instagram post types,
   first comments, notification publishing, image constraints, and channel
   schedules.
@@ -602,6 +724,8 @@ it.
 
 ## Future Directions
 
+- `shareNext` queue promotion and `shareNow` immediate publishing, with
+  separately reviewed risk and confirmation semantics.
 - Deliberate adoption and linking of existing Buffer posts.
 - Additional social scheduling providers using the same delivery boundary.
 - Approval chains and role-based external-action authorization.

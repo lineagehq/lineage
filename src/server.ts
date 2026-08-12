@@ -37,6 +37,9 @@ import { claimTokenFromRequest, registerAgentClaimRoutes } from './server/agentC
 import { registerAdapterRoutes } from './server/adapters/adapterRoutes';
 import { isAdapterSettingsError } from './server/adapters/adapterSettings';
 import { isPostingAdapterError } from './server/adapters/posting/bufferPostingService';
+import { isBufferConnectionError } from './server/adapters/buffer/bufferConnection';
+import { registerBufferRoutes } from './server/adapters/buffer/bufferRoutes';
+import { handleBufferRuntimeServerError } from './server/adapters/buffer/bufferRuntime';
 import { contentBatchRouter } from './server/contentBatchRoutes';
 import { isContentBatchError } from './server/contentBatches';
 import { listImageGenerationJobs } from './server/generationReceiptJobs';
@@ -153,6 +156,7 @@ app.get(
 app.get('/api/ledger', asyncRoute((req, res) => { res.json(getLedgerPageFromQuery(projectFrom(req), req.query)); }));
 app.post('/api/assets/lookup', asyncRoute((req, res) => { res.json(lookupAssets(projectFrom(req), Array.isArray(req.body.assetIds) ? req.body.assetIds.map(String) : [])); }));
 registerAdapterRoutes(app, projectFrom, asyncRoute);
+registerBufferRoutes(app, projectFrom, asyncRoute);
 registerAgentClaimRoutes(app, projectFrom, asyncRoute);
 app.use('/api/content', contentBatchRouter(projectFrom));
 app.use('/api/selections', assetSelectionRouter(projectFrom));
@@ -524,6 +528,8 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
     res.status(error.status).json({ error: error.message });
     return;
   }
+  if (isBufferConnectionError(error)) { res.status(error.status).json({ error: error.message }); return; }
+  if (handleBufferRuntimeServerError(error, res)) return;
   if (isAdapterSettingsError(error)) { res.status(error.status).json({ error: error.message }); return; }
   if (isAssetSelectionError(error)) {
     res.status(error.status).json({ error: error.message });

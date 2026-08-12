@@ -28,4 +28,15 @@ describe('asset Social-mark schema', () => {
       database.close();
     }
   });
+
+  it('creates project-scoped Buffer connection and channel catalog tables without secret columns', () => {
+    const database = lineageDb();
+    try {
+      const connectionColumns = database.prepare('pragma table_info(buffer_connections)').all() as Array<{ name: string }>;
+      const channelColumns = database.prepare('pragma table_info(buffer_channels)').all() as Array<{ name: string }>;
+      expect(connectionColumns.map(column => column.name)).toEqual(expect.arrayContaining(['project_id', 'organization_id', 'credential_ref', 'connection_fingerprint', 'channel_synced_at']));
+      expect(channelColumns.map(column => column.name)).toEqual(expect.arrayContaining(['project_id', 'channel_id', 'organization_id', 'capability_json', 'available', 'stale_at']));
+      expect([...connectionColumns, ...channelColumns].map(column => column.name).join(' ')).not.toMatch(/api_key|secret|token/);
+    } finally { database.close(); }
+  });
 });

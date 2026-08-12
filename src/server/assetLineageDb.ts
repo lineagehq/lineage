@@ -484,6 +484,41 @@ export function lineageDb(): DatabaseSync {
     create index if not exists generation_job_target_resolutions_job
       on generation_job_target_resolutions(job_id, parent_asset_id);
     create table if not exists adapter_settings (project_id text not null references projects(id), adapter_type text not null check (adapter_type in ('cloud', 'scheduler', 'image_generator')), provider text not null, enabled integer not null check (enabled in (0, 1)), secret_ref text, safe_config_json text not null, created_at text not null, updated_at text not null, primary key(project_id, adapter_type, provider)); create index if not exists adapter_settings_project_type on adapter_settings(project_id, adapter_type);
+    create table if not exists buffer_connections (
+      project_id text primary key references projects(id),
+      organization_id text not null,
+      credential_ref text not null,
+      cli_version text not null,
+      schema_fingerprint text not null,
+      connection_fingerprint text not null,
+      health_state text not null check (health_state in ('connected', 'credential_missing', 'organization_mismatch')),
+      channel_synced_at text,
+      created_at text not null,
+      updated_at text not null
+    );
+    create table if not exists buffer_channels (
+      project_id text not null references projects(id),
+      channel_id text not null,
+      organization_id text not null,
+      service text not null,
+      service_id text,
+      display_name text not null,
+      avatar_ref text,
+      timezone text,
+      posting_schedule_json text not null,
+      allowed_actions_json text not null,
+      capability_json text not null,
+      disconnected integer not null check (disconnected in (0, 1)),
+      locked integer not null check (locked in (0, 1)),
+      paused integer not null check (paused in (0, 1)),
+      available integer not null check (available in (0, 1)),
+      capability_registry_version integer not null,
+      provider_fingerprint text not null,
+      synced_at text not null,
+      stale_at text,
+      primary key(project_id, channel_id)
+    );
+    create index if not exists buffer_channels_project_available on buffer_channels(project_id, available, display_name);
     create table if not exists lineage_tasks (
       id text primary key,
       project_id text not null references projects(id),

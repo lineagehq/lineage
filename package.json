@@ -65,6 +65,7 @@
     "release:status": "node scripts/release-status.mjs"
   },
   "dependencies": {
+    "@bufferapp/cli": "1.2.0",
     "@dagrejs/dagre": "^3.0.0",
     "@xyflow/react": "^12.11.1",
     "express": "^4.19.2",

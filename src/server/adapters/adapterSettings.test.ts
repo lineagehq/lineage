@@ -33,12 +33,19 @@ describe('adapter settings', () => {
       safe_config: { bucket: '', mode: 'local-public-fallback', region: '' },
     });
     expect(snapshot.settings.find(setting => setting.provider === 'buffer')).toMatchObject({
-      credential: { detected: true, label: 'LINEAGE_SCHEDULER_TOKEN + LINEAGE_SCHEDULER_ORGANIZATION_ID', secret_ref: 'env:LINEAGE_SCHEDULER_TOKEN' },
+      credential: { detected: true, label: 'Credential reference env:LINEAGE_SCHEDULER_TOKEN', secret_ref: 'env:LINEAGE_SCHEDULER_TOKEN' },
       description: expect.stringContaining('without publishing'),
       health_status: 'live_disabled',
     });
     expect(JSON.stringify(snapshot)).not.toContain('scheduler-secret');
     expect(JSON.stringify(snapshot)).not.toContain('scheduler-org');
+  });
+
+  it('detects the configured credential reference without requiring or exposing global organization config', () => {
+    updateAdapterSetting(defaultProject, { adapterType: 'scheduler', confirmWrite: true, enabled: true, provider: 'buffer' });
+    const snapshot = getAdapterSettings(defaultProject, { LINEAGE_SCHEDULER_TOKEN: 'scheduler-secret' });
+    expect(snapshot.settings.find(setting => setting.provider === 'buffer')).toMatchObject({ credential: { detected: true }, health_status: 'configured' });
+    expect(JSON.stringify(snapshot)).not.toContain('scheduler-secret');
   });
 
   it('persists enabled state and non-secret config in sqlite', () => {

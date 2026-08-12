@@ -120,13 +120,15 @@ function parseConfig(value: string): Record<string, unknown> {
   }
 }
 
-function credentialFor(provider: AdapterProvider, env: NodeJS.ProcessEnv) {
+function credentialFor(provider: AdapterProvider, env: NodeJS.ProcessEnv, secretRef: string | null = null) {
   if (provider === 's3') {
     return { detected: false, label: 'Optional local cloud CLI credential', secret_ref: null };
   }
   if (provider === 'buffer') {
-    const detected = Boolean(env.LINEAGE_SCHEDULER_TOKEN && env.LINEAGE_SCHEDULER_ORGANIZATION_ID);
-    return { detected, label: 'LINEAGE_SCHEDULER_TOKEN + LINEAGE_SCHEDULER_ORGANIZATION_ID', secret_ref: 'env:LINEAGE_SCHEDULER_TOKEN' };
+    const resolvedRef = secretRef || 'env:LINEAGE_SCHEDULER_TOKEN';
+    const key = /^env:([A-Z][A-Z0-9_]*)$/.exec(resolvedRef)?.[1];
+    const detected = Boolean(key && env[key]);
+    return { detected, label: `Credential reference ${resolvedRef}`, secret_ref: resolvedRef };
   }
   return { detected: true, label: 'No external secret required', secret_ref: null };
 }
@@ -146,7 +148,7 @@ function healthStatus(provider: AdapterProvider, enabled: boolean, config: Recor
 
 function settingFromRow(row: AdapterSettingRow, env: NodeJS.ProcessEnv): AdapterSetting {
   const definition = definitionFor(row.adapter_type, row.provider);
-  const credential = credentialFor(row.provider, env);
+  const credential = credentialFor(row.provider, env, row.secret_ref);
   const enabled = row.enabled === 1;
   const safeConfig = parseConfig(row.safe_config_json);
   return {

@@ -29,4 +29,42 @@ describe('lineage runtime commands', () => {
       "lineage-preview next --project 'demo' --root 'root' --profile '/tmp/preview profile/profile.json' --json",
     );
   });
+
+  it.each([
+    {
+      name: 'preserves an embedded --json flag',
+      command: "next --json --project 'demo'",
+      expected: "next --json --project 'demo'",
+    },
+    {
+      name: 'accepts a command with no --json suffix',
+      command: "next --project 'demo'",
+      expected: "next --project 'demo'",
+    },
+    {
+      name: 'removes a trailing --json suffix',
+      command: "next --project 'demo' --json",
+      expected: "next --project 'demo'",
+    },
+    {
+      name: 'removes a trailing --json suffix followed by whitespace',
+      command: "next --project 'demo' --json \t\n",
+      expected: "next --project 'demo'",
+    },
+  ])('$name', ({ command, expected }) => {
+    process.env.LINEAGE_CHANNEL = 'preview';
+    process.env.LINEAGE_PROFILE_MANIFEST = '/tmp/preview profile/profile.json';
+    expect(lineageCliCommand(command)).toBe(
+      `lineage-preview ${expected} --profile '/tmp/preview profile/profile.json' --json`,
+    );
+  });
+
+  it('handles very long whitespace before a trailing --json suffix', () => {
+    process.env.LINEAGE_CHANNEL = 'preview';
+    process.env.LINEAGE_PROFILE_MANIFEST = '/tmp/preview profile/profile.json';
+    const command = `next --project 'demo'${' '.repeat(100_000)}--json`;
+    expect(lineageCliCommand(command)).toBe(
+      "lineage-preview next --project 'demo' --profile '/tmp/preview profile/profile.json' --json",
+    );
+  });
 });

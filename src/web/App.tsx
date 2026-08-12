@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AssetLibrarySnapshot, GrowthAsset, MutationResponse, PresignResponse } from '../shared/types';
 import type { LineageWorkspace } from '../shared/lineageWorkspaceTypes';
 import type { ProjectWorkspaceSummary } from '../shared/projectWorkspaceTypes';
@@ -77,6 +77,10 @@ function withoutCanvasReturnDestination(
   return next;
 }
 
+function confirmLineageSocialTransition(dirty: boolean, confirmDiscard: () => boolean): boolean {
+  return !dirty || confirmDiscard();
+}
+
 export function App() {
   const [destination, setDestination] = useState<ProjectWorkspaceDestination>(initialDestination);
   const [snapshot, setSnapshot] = useState<AssetLibrarySnapshot | null>(null);
@@ -108,6 +112,33 @@ export function App() {
   const [runtimeIdentityUnavailable, setRuntimeIdentityUnavailable] = useState(false);
   const [contextPanelOpen, setContextPanelOpen] = useState(readContextPanelOpen);
   const [mobileContextOpen, setMobileContextOpen] = useState(false);
+  const [appTransitionPending, setAppTransitionPending] = useState(false);
+  const lineageSocialDirtyRef = useRef(false);
+  const lineageChildTransitionPendingRef = useRef(false);
+  const appTransitionGenerationRef = useRef(0);
+  const activeAppTransitionTokenRef = useRef<number | null>(null);
+  const projectCatalogGenerationRef = useRef(0);
+  const updateLineageSocialDirty = useCallback((dirty: boolean) => {
+    lineageSocialDirtyRef.current = dirty;
+  }, []);
+  const updateLineageChildTransitionPending = useCallback((pending: boolean) => {
+    lineageChildTransitionPendingRef.current = pending;
+  }, []);
+  const approveLineageDiscard = useCallback(() => confirmLineageSocialTransition(lineageSocialDirtyRef.current, () => window.confirm('Discard unsaved Social changes?')), []);
+  const allowLineageTransition = useCallback(() => activeAppTransitionTokenRef.current === null && !lineageChildTransitionPendingRef.current && approveLineageDiscard(), [approveLineageDiscard]);
+  const beginAppTransition = useCallback(() => {
+    if (!allowLineageTransition()) return null;
+    const token = ++appTransitionGenerationRef.current;
+    activeAppTransitionTokenRef.current = token;
+    setAppTransitionPending(true);
+    return token;
+  }, [allowLineageTransition]);
+  const settleAppTransition = useCallback((token: number) => {
+    if (activeAppTransitionTokenRef.current !== token) return false;
+    activeAppTransitionTokenRef.current = null;
+    setAppTransitionPending(false);
+    return true;
+  }, []);
   const [canvasReturnDestinations, setCanvasReturnDestinations] = useState<CanvasReturnDestinations>(() => {
     const initial = initialDestination();
     const initialProject = projectFor(initial);
@@ -162,11 +193,36 @@ export function App() {
     window.history[options.replace ? 'replaceState' : 'pushState']({ lineageDestination: next }, '', href);
     applyDestination(next);
   }, [applyDestination]);
+  const navigateForUser = useCallback((
+    next: Exclude<ProjectWorkspaceDestination, { kind: 'invalid' }>,
+    options: { replace?: boolean; search?: string } = {},
+  ) => {
+    if (!allowLineageTransition()) return;
+    navigate(next, options);
+    return true;
+  }, [allowLineageTransition, navigate]);
+  const changeProject = useCallback((nextProject: string) => {
+    if (nextProject === project) return;
+    const nextDestination: Exclude<ProjectWorkspaceDestination, { kind: 'invalid' }> = surface === 'studio' && view !== 'lineage'
+      ? { kind: 'studio', projectId: nextProject, view }
+      : { kind: 'project', projectId: nextProject };
+    navigateForUser(nextDestination);
+  }, [navigateForUser, project, surface, view]);
+  const changeView = useCallback((nextView: StudioView) => {
+    if (nextView === view && surface === 'studio') return;
+    if (nextView === 'lineage') {
+      const remembered = canvasReturnDestinations[project] || readCanvasReturnDestination(project);
+      if (remembered) navigateForUser(remembered, { search: remembered.search });
+      else navigateForUser({ kind: 'project', projectId: project });
+      return;
+    }
+    navigateForUser({ kind: 'studio', projectId: project, view: nextView });
+  }, [canvasReturnDestinations, navigateForUser, project, surface, view]);
 
   const projectSnapshot = snapshot?.catalog.project === project ? snapshot : null;
   const assets = projectSnapshot?.assets || [];
   const selectedFromList = selectedOrFirst(assets, selectedId);
-  const selected = selectedFromList || (inspectedAsset?.project === project && inspectedAsset.asset_id === selectedId ? inspectedAsset : undefined);
+  const selected = selectedFromList || (inspectedAsset && inspectedAsset.project === project && inspectedAsset.asset_id === selectedId ? inspectedAsset : undefined);
   const selectedAssetId = selected?.asset_id || '';
   const localBackupAssets = [
     ...queuedBackupAssets.filter(asset => localBackupIds.includes(asset.asset_id)),
@@ -184,20 +240,33 @@ export function App() {
     [projectSnapshot]
   );
   async function refreshProjects(): Promise<ProjectWorkspaceSummary[]> {
+    const requestGeneration = ++projectCatalogGenerationRef.current;
     try {
-      const result = await api<{ projects: ProjectWorkspaceSummary[] }>('/api/projects?pageSize=100&sort=manual');
-      let availableProjects = result.projects;
-      if (projectRouteIsUnavailable(destination, result.projects)) {
+      const result = await api<{ projects: Array<ProjectWorkspaceSummary | { project: string }> }>('/api/projects');
+      if (requestGeneration !== projectCatalogGenerationRef.current) return [];
+      const normalizedProjects = result.projects.map((item, index): ProjectWorkspaceSummary => 'id' in item ? item : {
+        id: item.project,
+        display_name: item.project,
+        product: item.project,
+        catalog_state: 'ready',
+        sort_position: index,
+        asset_count: 0,
+        workspace_count: 0,
+        created_at: '',
+        updated_at: '',
+      });
+      let availableProjects = normalizedProjects;
+      if (projectRouteIsUnavailable(destination, normalizedProjects)) {
         const unavailableProject = projectFor(destination);
         try {
           const detail = await api<{ project: ProjectWorkspaceSummary }>(`/api/projects/${encodeURIComponent(unavailableProject)}`);
-          availableProjects = [...result.projects, detail.project];
+          availableProjects = [...normalizedProjects, detail.project];
         } catch (error) {
           if (!(error instanceof ApiError) || error.status !== 404) throw error;
-          setProjects(result.projects);
+          setProjects(normalizedProjects);
           showToast('error', `Project ${unavailableProject} is unavailable. Returned to Projects.`);
           navigate({ kind: 'projects' }, { replace: true });
-          return result.projects;
+          return normalizedProjects;
         }
       }
       setProjects(availableProjects);
@@ -206,6 +275,7 @@ export function App() {
       }
       return availableProjects;
     } catch (error) {
+      if (requestGeneration !== projectCatalogGenerationRef.current) return [];
       setToast({ type: 'error', message: error instanceof Error ? error.message : String(error) });
       return [];
     }
@@ -340,9 +410,10 @@ export function App() {
     setStatus('all');
     setPlacementStatus('all');
     setQuery('');
-    setView('backup');
   }
   async function openAgentWork(target: AgentWorkTarget) {
+    const token = beginAppTransition();
+    if (token === null) return;
     try {
       if (target.assetId) setSelectedId(target.assetId);
       if (target.view === 'lineage') {
@@ -351,15 +422,19 @@ export function App() {
             type: 'error',
             message: `${target.claim.target_title || target.claim.target_id} is not linked to an exact Canvas workspace.`,
           });
+          settleAppTransition(token);
           return;
         }
         navigate({ kind: 'canvas', projectId: target.claim.project, workspaceId: target.workspaceId });
       } else {
         navigate({ kind: 'studio', projectId: target.claim.project, view: target.view });
       }
+      if (!settleAppTransition(token)) return;
+      if (target.assetId) setSelectedId(target.assetId);
       setAssetDetailsOpen(false);
       setToast({ type: 'ok', message: `Opened ${target.claim.target_title || target.claim.target_id}` });
     } catch (error) {
+      if (!settleAppTransition(token)) return;
       setToast({ type: 'error', message: error instanceof Error ? error.message : String(error) });
     }
   }
@@ -474,36 +549,32 @@ export function App() {
         projects={projects}
         surface={surface}
         canvasActive={destination.kind === 'canvas'}
-        onProjects={() => navigate({ kind: 'projects' })}
-        onProjectOverview={() => navigate({ kind: 'project', projectId: project })}
+        onProjects={() => navigateForUser({ kind: 'projects' })}
+        onProjectOverview={() => navigateForUser({ kind: 'project', projectId: project })}
         canvasAvailable={Boolean(canvasReturnDestination?.projectId === project)}
         onCanvas={() => {
           const remembered = canvasReturnDestination?.projectId === project
             ? canvasReturnDestination
             : readCanvasReturnDestination(project);
           if (remembered) {
-            navigate(remembered, { search: remembered.search });
+            navigateForUser(remembered, { search: remembered.search });
             return;
           }
-          navigate({ kind: 'project', projectId: project });
+          navigateForUser({ kind: 'project', projectId: project });
         }}
-        onStudio={nextView => {
-          if (nextView === 'lineage') {
-            return;
-          }
-          navigate({ kind: 'studio', projectId: project, view: nextView });
-        }}
+        onStudio={changeView}
         runtime={runtime}
         runtimeIdentityUnavailable={runtimeIdentityUnavailable}
         setChannel={setChannel}
         setPlacementStatus={setPlacementStatus}
+        setProject={changeProject}
         setSource={setSource}
         setStatus={setStatus}
         setUploadOpen={open => {
           if (open && surface !== 'studio') navigate({ kind: 'studio', projectId: project, view: 'assets' });
           setUploadOpen(open);
         }}
-        setView={setView}
+        setView={changeView}
         showBackupQueue={showBackupQueue}
         source={source}
         status={status}
@@ -641,6 +712,8 @@ export function App() {
             onAssetsChanged={refresh}
             onExitWorkspace={() => navigate({ kind: 'project', projectId: project })}
             onNewWorkspaceCancelled={() => navigate({ kind: 'project', projectId: project }, { replace: true })}
+            onSocialDirtyChange={updateLineageSocialDirty}
+            onSocialTransitionPendingChange={updateLineageChildTransitionPending}
             onSelectedAsset={setSelectedId}
             onToast={showToast}
             onCanvasPresentationChange={rememberCurrentCanvasPresentation}
@@ -661,6 +734,7 @@ export function App() {
               navigate({ kind: 'project', projectId: project }, { replace: true });
             }}
             project={project}
+            transitionLocked={appTransitionPending}
             workspaceId={workspaceId}
           />
         )}

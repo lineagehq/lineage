@@ -1,4 +1,4 @@
-import type { AssetSocialMark } from './socialMarkTypes';
+import type { AssetSocialMark } from './socialTypes';
 import type { AssetDiscussionMark } from './discussionMarkTypes';
 
 type AssetStatus = 'planned' | 'working' | 'approved' | 'published' | 'archived';

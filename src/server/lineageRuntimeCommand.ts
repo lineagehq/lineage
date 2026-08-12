@@ -29,6 +29,13 @@ export function lineageRuntimeSelector(databasePath?: string): string {
 }
 
 export function lineageCliCommand(command: string): string {
-  const normalized = command.trim().replace(/\s+--json$/, '');
+  let normalized = command.trim();
+  const jsonSuffix = '--json';
+  const jsonStart = normalized.length - jsonSuffix.length;
+  if (jsonStart > 0 && normalized.endsWith(jsonSuffix) && normalized[jsonStart - 1].trim() === '') {
+    let commandEnd = jsonStart - 1;
+    while (commandEnd > 0 && normalized[commandEnd - 1].trim() === '') commandEnd -= 1;
+    normalized = normalized.slice(0, commandEnd);
+  }
   return `${lineageCliLauncher()} ${normalized} ${lineageRuntimeSelector()} --json`;
 }

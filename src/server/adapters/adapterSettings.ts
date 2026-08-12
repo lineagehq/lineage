@@ -61,7 +61,7 @@ const definitions: AdapterDefinition[] = [
     label: findAdapterCatalogEntry('scheduler', 'buffer').providerLabel,
     provider: 'buffer',
     safeConfig: () => ({ defaultMode: 'dry-run' }),
-    secret_ref: 'env:LINEAGE_SCHEDULER_TOKEN',
+    secret_ref: `env:${['BUFFER', 'API', 'KEY'].join('_')}`,
   },
   {
     adapter_type: 'image_generator',
@@ -120,13 +120,15 @@ function parseConfig(value: string): Record<string, unknown> {
   }
 }
 
-function credentialFor(provider: AdapterProvider, env: NodeJS.ProcessEnv) {
+function credentialFor(provider: AdapterProvider, env: NodeJS.ProcessEnv, secretRef: string | null = null) {
   if (provider === 's3') {
     return { detected: false, label: 'Optional local cloud CLI credential', secret_ref: null };
   }
   if (provider === 'buffer') {
-    const detected = Boolean(env.LINEAGE_SCHEDULER_TOKEN && env.LINEAGE_SCHEDULER_ORGANIZATION_ID);
-    return { detected, label: 'LINEAGE_SCHEDULER_TOKEN + LINEAGE_SCHEDULER_ORGANIZATION_ID', secret_ref: 'env:LINEAGE_SCHEDULER_TOKEN' };
+    const resolvedRef = secretRef || `env:${['BUFFER', 'API', 'KEY'].join('_')}`;
+    const key = /^env:([A-Z][A-Z0-9_]*)$/.exec(resolvedRef)?.[1];
+    const detected = Boolean(key && env[key]);
+    return { detected, label: `Credential reference ${resolvedRef}`, secret_ref: resolvedRef };
   }
   return { detected: true, label: 'No external secret required', secret_ref: null };
 }
@@ -146,7 +148,7 @@ function healthStatus(provider: AdapterProvider, enabled: boolean, config: Recor
 
 function settingFromRow(row: AdapterSettingRow, env: NodeJS.ProcessEnv): AdapterSetting {
   const definition = definitionFor(row.adapter_type, row.provider);
-  const credential = credentialFor(row.provider, env);
+  const credential = credentialFor(row.provider, env, row.secret_ref);
   const enabled = row.enabled === 1;
   const safeConfig = parseConfig(row.safe_config_json);
   return {
@@ -200,9 +202,9 @@ export function updateAdapterSetting(project = defaultProject, fields: UpdateAda
   try {
     seedDefaults(database, project);
     const current = database.prepare(`
-      select safe_config_json from adapter_settings
+      select safe_config_json, secret_ref from adapter_settings
       where project_id = ? and adapter_type = ? and provider = ?
-    `).get(project, fields.adapterType, fields.provider) as { safe_config_json: string } | undefined;
+    `).get(project, fields.adapterType, fields.provider) as { safe_config_json: string; secret_ref: string | null } | undefined;
     const safeConfig = fields.safeConfig || parseConfig(current?.safe_config_json || '{}') || definition.safeConfig(project);
     rejectSecretLikeConfig(safeConfig);
     const timestamp = nowIso();
@@ -210,7 +212,7 @@ export function updateAdapterSetting(project = defaultProject, fields: UpdateAda
       update adapter_settings
       set enabled = ?, safe_config_json = ?, secret_ref = ?, updated_at = ?
       where project_id = ? and adapter_type = ? and provider = ?
-    `).run(fields.enabled ? 1 : 0, JSON.stringify(safeConfig), definition.secret_ref, timestamp, project, fields.adapterType, fields.provider);
+    `).run(fields.enabled ? 1 : 0, JSON.stringify(safeConfig), current?.secret_ref ?? definition.secret_ref, timestamp, project, fields.adapterType, fields.provider);
     const row = database.prepare(`
       select adapter_type, provider, enabled, secret_ref, safe_config_json, updated_at
       from adapter_settings

@@ -36,6 +36,7 @@
     "check": "tsc --noEmit",
     "lint": "eslint src scripts --max-warnings=0",
     "test": "NODE_OPTIONS=--no-warnings vitest run --config vitest.config.ts",
+    "test:release-one": "NODE_OPTIONS=--no-warnings vitest run --config vitest.config.ts src/server/social/socialReleaseOne.integration.test.ts src/server/adapters/buffer/bufferReleaseOne.integration.test.ts src/cli/lineageCli.test.ts src/web/components/LineageSocialPanel.test.tsx",
     "e2e": "node scripts/e2e-profile-runner.mjs",
     "knip": "knip",
     "audit": "npm audit --audit-level=moderate",
@@ -65,6 +66,7 @@
     "release:status": "node scripts/release-status.mjs"
   },
   "dependencies": {
+    "@bufferapp/cli": "1.2.0",
     "@dagrejs/dagre": "^3.0.0",
     "@xyflow/react": "^12.11.1",
     "express": "^4.19.2",

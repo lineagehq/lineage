@@ -145,10 +145,10 @@ describe('LineageContextMenu', () => {
     expect(labels).toContain('Needs revision');
   });
 
-  it('toggles the independent Social marker and closes the menu', () => {
+  it('opens Social composition without changing the independent marker', () => {
     const events: string[] = [];
     const unmarkedMenu = LineageContextMenu(baseProps(node, events));
-    collectButtons(unmarkedMenu).find(button => flattenText(button) === 'Mark for Social')?.props.onClick();
+    collectButtons(unmarkedMenu).find(button => flattenText(button) === 'Open Social composition')?.props.onClick();
     const markedMenu = LineageContextMenu(baseProps({
       ...node,
       social_mark: {
@@ -162,9 +162,16 @@ describe('LineageContextMenu', () => {
         updated_at: '2026-07-25T00:00:00.000Z',
       },
     }, events));
-    collectButtons(markedMenu).find(button => flattenText(button) === 'Unmark from Social')?.props.onClick();
+    collectButtons(markedMenu).find(button => flattenText(button) === 'Open Social composition')?.props.onClick();
 
     expect(events).toEqual(['toggle-social', 'close', 'toggle-social', 'close']);
+  });
+
+  it('keeps the context menu open when a protected Social transition is rejected', () => {
+    const events: string[] = [];
+    const menu = LineageContextMenu({ ...baseProps(node, events), onToggleSocial: () => false });
+    collectButtons(menu).find(button => flattenText(button) === 'Open Social composition')?.props.onClick();
+    expect(events).toEqual([]);
   });
 
   it('toggles a discussion Flag independently', () => {

@@ -52,13 +52,13 @@ test('flags nodes for discussion with compact configurable actions and persisten
   await expect(quickActions.getByRole('button', { name: 'Flag', exact: true })).toHaveClass(/selected/);
   const socialButton = quickActions.getByRole('button', { name: 'Social', exact: true });
   await socialButton.click();
-  await expect(socialButton).toHaveAttribute('aria-pressed', 'true');
-  await expect(socialButton).toHaveClass(/selected/);
+  const socialPanel = page.getByRole('complementary', { name: 'Social composition' });
+  await expect(socialPanel).toBeVisible();
+  await socialPanel.getByRole('button', { name: 'Close Social composition' }).click();
   await nodes.first().focus();
   await page.keyboard.press('s');
-  await nodes.first().hover();
-  await expect(quickActions.getByRole('button', { name: 'Social', exact: true })).toHaveAttribute('aria-pressed', 'false');
-  await expect(quickActions.getByRole('button', { name: 'Social', exact: true })).not.toHaveClass(/selected/);
+  await expect(socialPanel).toBeVisible();
+  await socialPanel.getByRole('button', { name: 'Close Social composition' }).click();
 
   const snapshot = await (await request.get(`/api/lineage/${rootAssetId}?project=${project}`)).json();
   const additional = snapshot.nodes.map((node: { asset_id: string }) => node.asset_id).filter((id: string) => id !== firstId).slice(0, 2);

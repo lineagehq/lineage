@@ -1,5 +1,7 @@
 import { defaultProject, listProjects, validateProject } from '../assetCore';
 import { createBufferPostingAdapter } from './posting/bufferPostingAdapter';
+import { getBufferConnection, resolveBufferCredential } from './buffer/bufferConnection';
+import { listBufferChannels } from './buffer/bufferChannelSync';
 
 export function getAdapterStatus(project: string, env: NodeJS.ProcessEnv = process.env) {
   const summary = listProjects().find(item => item.project === project) || (project === defaultProject ? validateProject(project) : undefined);
@@ -8,6 +10,10 @@ export function getAdapterStatus(project: string, env: NodeJS.ProcessEnv = proce
     runBuffer: () => ({ stdout: '{}', stderr: '' }),
     writePayload: () => '.asset-scratch/buffer-dry-run.json',
   });
+  const connection = getBufferConnection(project);
+  const channels = connection ? listBufferChannels(project) : [];
+  const credentialEnvironment = connection ? /^env:([A-Z][A-Z0-9_]*)$/.exec(connection.credential_ref)?.[1] || 'invalid reference' : '';
+  const credentialDetected = connection ? Boolean(resolveBufferCredential(connection.credential_ref, env)) : false;
   return {
     project,
     fetchedAt: new Date().toISOString(),
@@ -31,5 +37,18 @@ export function getAdapterStatus(project: string, env: NodeJS.ProcessEnv = proce
           default_region: summary?.default_region || null,
         }],
     posting: [buffer.status()],
+    buffer_connection: connection ? {
+      available_channel_count: channels.filter(channel => channel.available).length,
+      channel_count: channels.length,
+      connected: connection.health_state === 'connected' && credentialDetected,
+      credential_detected: credentialDetected,
+      credential_environment: credentialEnvironment,
+      disconnected_channel_count: channels.filter(channel => channel.disconnected).length,
+      organization_id: connection.organization_id,
+      cli_version: connection.cli_version,
+      channel_synced_at: connection.channel_synced_at,
+      health_state: credentialDetected ? connection.health_state : 'credential_missing',
+      stale_channel_count: channels.filter(channel => Boolean(channel.stale_at)).length,
+    } : null,
   };
 }

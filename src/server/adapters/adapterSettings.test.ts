@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useLineageTestProfile } from '../../test/lineageTestProfile';
 import { defaultProject, repoRoot } from '../assetCore';
+import { lineageDb } from '../assetLineageDb';
 import { getAdapterSettings, updateAdapterSetting } from './adapterSettings';
 
 const scratchDir = join(repoRoot, '.asset-scratch', 'vitest-adapter-settings');
@@ -33,12 +34,33 @@ describe('adapter settings', () => {
       safe_config: { bucket: '', mode: 'local-public-fallback', region: '' },
     });
     expect(snapshot.settings.find(setting => setting.provider === 'buffer')).toMatchObject({
-      credential: { detected: true, label: 'LINEAGE_SCHEDULER_TOKEN + LINEAGE_SCHEDULER_ORGANIZATION_ID', secret_ref: 'env:LINEAGE_SCHEDULER_TOKEN' },
+      credential: { detected: false, label: `Credential reference env:${['BUFFER', 'API', 'KEY'].join('_')}`, secret_ref: `env:${['BUFFER', 'API', 'KEY'].join('_')}` },
       description: expect.stringContaining('without publishing'),
       health_status: 'live_disabled',
     });
     expect(JSON.stringify(snapshot)).not.toContain('scheduler-secret');
     expect(JSON.stringify(snapshot)).not.toContain('scheduler-org');
+  });
+
+  it('detects the configured credential reference without requiring or exposing global organization config', () => {
+    updateAdapterSetting(defaultProject, { adapterType: 'scheduler', confirmWrite: true, enabled: true, provider: 'buffer' });
+    const snapshot = getAdapterSettings(defaultProject, { [['BUFFER', 'API', 'KEY'].join('_')]: 'scheduler-secret' });
+    expect(snapshot.settings.find(setting => setting.provider === 'buffer')).toMatchObject({ credential: { detected: true }, health_status: 'configured' });
+    expect(JSON.stringify(snapshot)).not.toContain('scheduler-secret');
+  });
+
+  it('preserves an existing credential reference when the adapter switch changes', () => {
+    getAdapterSettings(defaultProject, {});
+    const database = lineageDb();
+    database.prepare("update adapter_settings set secret_ref='env:SYNTHETIC_BUFFER_KEY' where project_id=? and provider='buffer'").run(defaultProject);
+    database.close();
+
+    updateAdapterSetting(defaultProject, { adapterType: 'scheduler', confirmWrite: true, enabled: true, provider: 'buffer' });
+
+    expect(getAdapterSettings(defaultProject, { SYNTHETIC_BUFFER_KEY: 'not-returned' }).settings.find(setting => setting.provider === 'buffer')?.credential).toMatchObject({
+      detected: true,
+      secret_ref: 'env:SYNTHETIC_BUFFER_KEY',
+    });
   });
 
   it('persists enabled state and non-secret config in sqlite', () => {

@@ -21,7 +21,7 @@ providerIds:
 | Capability | Current provider | Maturity | Important boundary |
 | --- | --- | --- | --- |
 | Cloud storage | Amazon S3 | Available | Configuration and writes are explicit |
-| Social scheduling | Buffer | Preview | Dry-run payloads only; live posting is disabled |
+| Social scheduling | Buffer | Preview | Release 1 channel sync and local composition only; live scheduling is unavailable |
 | Image generation | Codex handoff | Available | Handoff and import receipts; no embedded model |
 
 Provider credentials and project configuration are never stored in the public

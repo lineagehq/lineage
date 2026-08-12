@@ -46,10 +46,10 @@ describe('Lineage navigation behavior', () => {
     expect(appSource).toContain("window.history[options.replace ? 'replaceState' : 'pushState']");
     expect(appSource).toContain("window.addEventListener('popstate', onPopState)");
     expect(appSource).toContain("kind: 'canvas', projectId: nextProject, workspaceId: workspace.id");
-    expect(appSource).toContain("navigate({ kind: 'studio', projectId: project, view: nextView })");
+    expect(appSource).toContain("navigateForUser({ kind: 'studio', projectId: project, view: nextView })");
     expect(appSource).toContain("if (next.kind === 'canvas' || next.kind === 'new-workspace') setView('lineage')");
     expect(appSource).toContain('onCanvasPresentationChange={rememberCurrentCanvasPresentation}');
-    expect(appSource).toContain('navigate(remembered, { search: remembered.search })');
+    expect(appSource).toContain('navigateForUser(remembered, { search: remembered.search })');
     expect(appSource).toContain('forgetCanvasReturnDestination(project)');
     expect(appSource).toContain('workspaceId={workspaceId}');
     expect(appSource).toContain('onExitWorkspace={() => navigate');

@@ -1,7 +1,42 @@
-import { describe, expect, it } from 'vitest';
+// @vitest-environment jsdom
+import { createRoot, type Root } from 'react-dom/client';
+import { act, createElement, type ReactNode } from 'react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LineageNode, LineageTask, LineageTaskStatus, LineageTaskType } from '../../shared/types';
 import { lineageCanvasEmptyState, lineageSemanticZoomTier } from './LineageCanvas';
 import { quickActionState } from './lineageQuickActions';
+
+vi.mock('@xyflow/react', async () => {
+  const React = await import('react');
+  const Empty = () => null;
+  return {
+    Background: Empty,
+    Controls: Empty,
+    Handle: Empty,
+    MiniMap: () => React.createElement('div', { 'data-testid': 'minimap' }),
+    Position: { Bottom: 'bottom', Left: 'left', Right: 'right', Top: 'top' },
+    ReactFlow: (props: { children?: ReactNode; nodes: Array<{ data: LineageNode & { onToggleSocial: (node: LineageNode) => void } }> }) => React.createElement(
+      React.Fragment,
+      null,
+      React.createElement(
+        'button',
+        { 'data-testid': 'invoke-social', onClick: () => props.nodes[0].data.onToggleSocial(props.nodes[0].data) },
+        'Invoke Social',
+      ),
+      props.children,
+    ),
+  };
+});
+
+let canvasRoot: Root | null = null;
+let canvasContainer: HTMLDivElement | null = null;
+
+afterEach(() => {
+  if (canvasRoot) act(() => canvasRoot?.unmount());
+  canvasRoot = null;
+  canvasContainer?.remove();
+  canvasContainer = null;
+});
 
 describe('lineage inspector quick-action safety', () => {
   it('enforces branch capacity without trapping an already selected node', () => {
@@ -136,21 +171,91 @@ describe('portrait canvas semantic zoom', () => {
 
 describe('lineage canvas view aids', () => {
   it('renders the minimap only when its Canvas preference is visible', async () => {
-    const source = await import('node:fs').then(({ readFileSync }) =>
-      readFileSync(new URL('./LineageCanvas.tsx', import.meta.url), 'utf8'));
+    await renderTestCanvas({ minimapVisible: false });
+    expect(canvasContainer!.querySelector('[data-testid="minimap"]')).toBeNull();
 
-    expect(source).toContain('{minimapVisible && <MiniMap pannable zoomable />}');
+    act(() => canvasRoot!.unmount());
+    canvasRoot = null;
+    canvasContainer!.remove();
+    canvasContainer = null;
+    await renderTestCanvas({ minimapVisible: true });
+    expect(canvasContainer!.querySelector('[data-testid="minimap"]')).not.toBeNull();
+  });
+
+  it('serializes interacted Social actions so duplicate requests cannot overlap', async () => {
+    let resolveFirst!: () => void;
+    const onToggleSocial = vi.fn(() => new Promise<void>(resolve => { resolveFirst = resolve; }));
+    await renderTestCanvas({ onToggleSocial });
+    const invoke = canvasContainer!.querySelector<HTMLButtonElement>('[data-testid="invoke-social"]')!;
+
+    act(() => {
+      invoke.click();
+      invoke.click();
+    });
+    expect(onToggleSocial).toHaveBeenCalledTimes(1);
+
+    await act(async () => resolveFirst());
+    act(() => invoke.click());
+    expect(onToggleSocial).toHaveBeenCalledTimes(2);
   });
 
   it('routes an unbound Canvas back to the Workspaces directory instead of creating in place', async () => {
     const source = await import('node:fs').then(({ readFileSync }) =>
-      readFileSync(new URL('./LineageCanvas.tsx', import.meta.url), 'utf8'));
+      readFileSync(`${process.cwd()}/src/web/components/LineageCanvas.tsx`, 'utf8'));
 
     expect(source).toContain('onBrowseWorkspaces');
     expect(source).toContain('Browse workspaces');
     expect(source).not.toContain('>New lineage</button>');
   });
 });
+
+async function renderTestCanvas(overrides: Record<string, unknown> = {}) {
+  const { LineageCanvas } = await import('./LineageCanvas');
+  canvasContainer = document.createElement('div');
+  document.body.appendChild(canvasContainer);
+  canvasRoot = createRoot(canvasContainer);
+  act(() => canvasRoot!.render(createElement(LineageCanvas, {
+    canvasPresentation: 'compact',
+    collapseInteractive: true,
+    flowEdges: [],
+    flowNodes: [{ data: { ...node(), active: false, focusRole: 'none', root: true }, id: 'local-node', position: { x: 0, y: 0 }, type: 'assetNode' } as never],
+    graphKey: 'social-interaction-test',
+    hoverPreviewsEnabled: false,
+    loading: false,
+    minimapVisible: false,
+    onBranchLimitReached: vi.fn(),
+    onBrowseWorkspaces: vi.fn(),
+    onClearFocus: vi.fn(),
+    onEdgesChange: vi.fn(),
+    onEdgeEdit: vi.fn(),
+    onIndexNow: vi.fn(),
+    onEditDiscussionNote: vi.fn(),
+    onEditVariationPrompt: vi.fn(),
+    onNodeActionMenu: vi.fn(),
+    onNodeInspect: vi.fn(),
+    onNodeOpenDetail: vi.fn(),
+    onNodeOpenHistory: vi.fn(),
+    onNodePosition: vi.fn(),
+    onNodesChange: vi.fn(),
+    onReady: vi.fn(),
+    onSeedDemo: vi.fn(),
+    onSelectedAsset: vi.fn(),
+    onToggleBranch: vi.fn(),
+    onToggleCollapse: vi.fn(),
+    onToggleDiscussion: vi.fn(),
+    onToggleReroll: vi.fn(),
+    onToggleSocial: vi.fn(),
+    onViewportInteraction: vi.fn(),
+    replayInteractive: true,
+    selectedCount: 0,
+    selectionLimit: 3,
+    selectionFull: false,
+    visibleActions: { branch: true, details: true, flag: true, reroll: true, social: true },
+    workspaceProgress: 'ready',
+    workspaceRootAssetId: 'local-node',
+    ...overrides,
+  })));
+}
 
 function node(overrides: Partial<LineageNode> = {}): LineageNode {
   return {

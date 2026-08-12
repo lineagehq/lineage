@@ -42,15 +42,15 @@ export function LineageContextMenu({
   onReview: (reviewState: AssetReviewState) => void;
   onSelectNext: () => void;
   onMarkReroll: () => void;
+  onToggleSocial: () => unknown;
   onEditDiscussionNote: () => void;
-  onToggleSocial: () => void;
   onToggleDiscussion: () => void;
   position: { x: number; y: number };
   selectedCount: number;
   selectionFull: boolean;
 }) {
-  function run(action: () => void) {
-    action();
+  function run(action: () => unknown) {
+    if (action() === false) return;
     onClose();
   }
 
@@ -68,7 +68,7 @@ export function LineageContextMenu({
         ? <button className="reroll-action" onClick={() => run(onClearReroll)} role="menuitem">Clear re-roll request</button>
         : <button className="reroll-action" onClick={() => run(onMarkReroll)} role="menuitem">Mark for re-roll</button>}
       <button className="social-action" onClick={() => run(onToggleSocial)} role="menuitem">
-        {node.social_mark?.active ? 'Unmark from Social' : 'Mark for Social'}
+        Open Social composition
       </button>
       <button className="discussion-action" onClick={() => run(onToggleDiscussion)} role="menuitem">
         {node.discussion_mark?.active ? 'Remove discussion flag' : 'Flag for discussion'}

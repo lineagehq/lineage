@@ -1,5 +1,7 @@
 import type { LineageAttempt, LineageSnapshot } from './types';
 
+export const SOCIAL_MARK_NOTES_MAX_CODE_POINTS = 1000;
+
 export interface AssetSocialMark {
   active: boolean;
   asset_id: string;

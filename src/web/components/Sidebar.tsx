@@ -59,6 +59,7 @@ export function Sidebar(props: {
   runtimeIdentityUnavailable: boolean;
   setChannel: (value: string) => void;
   setPlacementStatus: (value: PlacementFilter) => void;
+  setProject?: (project: string) => void;
   setSource: (value: SourceFilter) => void;
   setStatus: (value: StatusFilter) => void;
   setUploadOpen: (value: boolean) => void;
@@ -113,7 +114,6 @@ export function Sidebar(props: {
     }
     props.onStudio(view);
     if (view === 'backup') props.showBackupQueue();
-    else props.setView(view);
     props.onMobileContextOpenChange(false);
   }
 

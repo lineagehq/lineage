@@ -149,6 +149,49 @@ describe('asset social mark persistence', () => {
     }
   });
 
+  it('accepts exactly 1000 trimmed Unicode code points and rejects longer notes before any write', () => {
+    const files = seedLineage();
+    const exact = `  ${'💡'.repeat(1000)}  `;
+    const overLimit = '💡'.repeat(1001);
+
+    expect(() => markAssetSocial(defaultProject, {
+      asset: files.childId,
+      confirmWrite: true,
+      markedBy: 'human:owner',
+      notes: overLimit,
+      rootAssetId: files.rootId,
+    })).toThrow('1000 Unicode code points');
+    expect(listAssetSocialMarks(defaultProject, files.rootId).marks).toEqual([]);
+
+    const marked = markAssetSocial(defaultProject, {
+      asset: files.childId,
+      confirmWrite: true,
+      markedBy: 'human:owner',
+      notes: exact,
+      rootAssetId: files.rootId,
+    });
+    expect(marked.mark?.notes).toBe('💡'.repeat(1000));
+    expect([...marked.mark!.notes!]).toHaveLength(1000);
+
+    const database = lineageDb();
+    try {
+      const before = database.prepare('select * from asset_social_marks where project_id = ? and root_asset_id = ? and asset_id = ?')
+        .get(defaultProject, files.rootId, files.childId);
+      expect(() => markAssetSocial(defaultProject, {
+        asset: files.childId,
+        confirmWrite: true,
+        markedBy: 'agent:social',
+        notes: overLimit,
+        rootAssetId: files.rootId,
+      })).toThrow('1000 Unicode code points');
+      const after = database.prepare('select * from asset_social_marks where project_id = ? and root_asset_id = ? and asset_id = ?')
+        .get(defaultProject, files.rootId, files.childId);
+      expect(after).toEqual(before);
+    } finally {
+      database.close();
+    }
+  });
+
   it('keeps the same asset isolated between parent and child canvas roots', () => {
     const files = seedLineage();
     createLineageWorkspace(defaultProject, {
@@ -174,6 +217,59 @@ describe('asset social mark persistence', () => {
       rootAssetId: files.childId,
     });
     expect(listAssetSocialMarks(defaultProject, files.childId).marks.map(mark => mark.asset_id)).toEqual([files.childId]);
+  });
+
+  it('isolates active marks and authoritative snapshots across two projects and two canvases', () => {
+    const files = seedLineage();
+    const otherProject = 'other-project';
+    const otherRoot = 'other-social-root';
+    const otherChild = 'other-social-child';
+    const timestamp = '2026-08-11T20:00:00.000Z';
+    const database = lineageDb();
+    try {
+      database.prepare('insert into projects (id, product, catalog_path, created_at, updated_at) values (?, ?, null, ?, ?)')
+        .run(otherProject, otherProject, timestamp, timestamp);
+      const insertAsset = database.prepare(`
+        insert into assets (
+          id, project_id, source, local_path, s3_key, checksum_sha256, media_type,
+          title, status, channel, campaign, audience, size_bytes, content_type,
+          created_at, updated_at, last_seen_at
+        ) values (?, ?, 'local', null, null, null, 'image', ?, 'working', 'social', null, null, null, 'image/png', ?, ?, ?)
+      `);
+      insertAsset.run(otherRoot, otherProject, 'Other root', timestamp, timestamp, timestamp);
+      insertAsset.run(otherChild, otherProject, 'Other child', timestamp, timestamp, timestamp);
+      database.prepare(`
+        insert into asset_edges (id, project_id, parent_asset_id, child_asset_id, relation_type, created_at)
+        values (?, ?, ?, ?, 'derived_from', ?)
+      `).run(`${otherProject}:edge`, otherProject, otherRoot, otherChild, timestamp);
+    } finally {
+      database.close();
+    }
+    createLineageWorkspace(defaultProject, { confirmWrite: true, rootAssetId: files.childId, title: 'Default child canvas' });
+    createLineageWorkspace(otherProject, { confirmWrite: true, rootAssetId: otherChild, title: 'Other child canvas' });
+
+    markAssetSocial(defaultProject, {
+      asset: files.childId,
+      confirmWrite: true,
+      markedBy: 'human:default',
+      rootAssetId: files.rootId,
+    });
+    markAssetSocial(otherProject, {
+      asset: otherChild,
+      confirmWrite: true,
+      markedBy: 'human:other',
+      rootAssetId: otherRoot,
+    });
+
+    expect(listAssetSocialMarks(defaultProject, files.rootId).marks.map(mark => mark.asset_id)).toEqual([files.childId]);
+    expect(listAssetSocialMarks(otherProject, otherRoot).marks.map(mark => mark.asset_id)).toEqual([otherChild]);
+    expect(listAssetSocialMarks(defaultProject, files.childId).marks).toEqual([]);
+    expect(listAssetSocialMarks(otherProject, otherChild).marks).toEqual([]);
+    expect(getLineageSnapshot(defaultProject, files.rootId).nodes.find(node => node.asset_id === files.childId)?.social_mark?.marked_by).toBe('human:default');
+    expect(getLineageSnapshot(otherProject, otherRoot).nodes.find(node => node.asset_id === otherChild)?.social_mark?.marked_by).toBe('human:other');
+    expect(getLineageSnapshot(defaultProject, files.childId).nodes[0].social_mark).toBeUndefined();
+    expect(getLineageSnapshot(otherProject, otherChild).nodes[0].social_mark).toBeUndefined();
+    expect(() => listAssetSocialMarks(otherProject, files.rootId)).toThrow();
   });
 
   it('fails closed for non-canonical roots, invisible assets, and ambiguous titles', () => {

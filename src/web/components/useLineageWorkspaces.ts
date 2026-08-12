@@ -25,24 +25,32 @@ export interface DemoSeedMediaStatus {
 
 export function useLineageWorkspaces({
   asset,
-  onResetLineage,
+  isTransitionOwner = () => true,
+  onBeforeTransition = () => 1,
+  onResetLineage = () => undefined,
+  onTransitionSettled = () => true,
   onSelectedAsset,
   onToast,
-  onWorkspaceChange,
-  onWorkspaceUnavailable,
+  onWorkspaceChange = () => undefined,
+  onWorkspaceUnavailable = () => undefined,
   project,
   workspaceId,
 }: {
   asset?: GrowthAsset;
-  onResetLineage: () => void;
+  isTransitionOwner?: (token: number) => boolean;
+  onBeforeTransition?: () => number | null;
+  onResetLineage?: () => void;
+  onTransitionSettled?: (token: number, outcome: 'failure' | 'noop' | 'success') => boolean;
   onSelectedAsset: (assetId: string) => void;
   onToast: (type: 'ok' | 'error', message: string) => void;
-  onWorkspaceChange: (workspace: LineageWorkspace | null) => void;
-  onWorkspaceUnavailable: (message: string) => void;
+  onWorkspaceChange?: (workspace: LineageWorkspace | null) => void;
+  onWorkspaceUnavailable?: (message: string) => void;
   project: string;
-  workspaceId: string | null;
+  workspaceId?: string | null;
 }) {
   const currentProjectRef = useRef(project);
+  const beforeTransitionRef = useRef(onBeforeTransition);
+  const workspaceSnapshotRef = useRef<LineageWorkspaceSnapshot | null>(null);
   const currentWorkspaceIdRef = useRef(workspaceId);
   const refreshGenerationRef = useRef(0);
   currentProjectRef.current = project;
@@ -61,15 +69,19 @@ export function useLineageWorkspaces({
     : null;
   const fallbackAssetId = !workspaceId && hasCurrentWorkspaceSnapshot && projectWorkspaceSnapshot?.workspaces.length === 0 ? asset?.asset_id : undefined;
   const workspaceRootAssetId = lineageWorkspaceRootAssetId(activeWorkspace, fallbackAssetId);
+  beforeTransitionRef.current = onBeforeTransition;
+  workspaceSnapshotRef.current = workspaceSnapshot;
 
   useEffect(() => {
-    refreshGenerationRef.current += 1;
     setWorkspaceSnapshot(null);
     setDemoSeedStatus(null);
     setSwissifierDemoStatus(null);
   }, [project]);
 
-  const refreshWorkspaces = useCallback(async () => {
+  const refreshWorkspaces = useCallback(async (options: { transitionToken?: number } = {}) => {
+    const ownsTransaction = options.transitionToken === undefined;
+    const token = options.transitionToken ?? beforeTransitionRef.current();
+    if (token === null) return false;
     const generation = ++refreshGenerationRef.current;
     const requestedProject = project;
     const requestedWorkspaceId = workspaceId;
@@ -77,25 +89,39 @@ export function useLineageWorkspaces({
     try {
       const params = new URLSearchParams({ project });
       const next = await api<LineageWorkspaceSnapshot>(`/api/lineage-workspaces?${params.toString()}`);
+      if (generation !== refreshGenerationRef.current || !isTransitionOwner(token)) return false;
       if (
-        generation !== refreshGenerationRef.current
-        || next.project !== currentProjectRef.current
+        next.project !== currentProjectRef.current
         || requestedProject !== currentProjectRef.current
         || requestedWorkspaceId !== currentWorkspaceIdRef.current
-      ) return;
+      ) {
+        if (ownsTransaction) onTransitionSettled(token, 'failure');
+        return false;
+      }
+      const current = workspaceSnapshotRef.current;
+      const currentActive = requestedWorkspaceId
+        ? current?.workspaces.find(workspace => workspace.id === requestedWorkspaceId && workspace.status !== 'archived') || null
+        : null;
+      const nextActive = requestedWorkspaceId
+        ? next.workspaces.find(workspace => workspace.id === requestedWorkspaceId && workspace.status !== 'archived') || null
+        : null;
+      const sourceReplaced = Boolean(currentActive) && currentActive?.root_asset_id !== nextActive?.root_asset_id;
+      if (ownsTransaction && !onTransitionSettled(token, sourceReplaced ? 'success' : 'noop')) return false;
       setWorkspaceSnapshot(next);
       if (requestedWorkspaceId) {
         const requested = next.workspaces.find(workspace => workspace.id === requestedWorkspaceId && workspace.status !== 'archived');
         if (!requested) onWorkspaceUnavailableRef.current(`Workspace ${requestedWorkspaceId} is unavailable in ${requestedProject}.`);
       }
+      return true;
     } catch (error) {
-      if (generation === refreshGenerationRef.current) {
-        onToast('error', error instanceof Error ? error.message : String(error));
-      }
+      if (generation !== refreshGenerationRef.current || !isTransitionOwner(token)) return false;
+      if (ownsTransaction) onTransitionSettled(token, 'failure');
+      onToast('error', error instanceof Error ? error.message : String(error));
+      return false;
     } finally {
       if (generation === refreshGenerationRef.current) setWorkspaceLoading(false);
     }
-  }, [onToast, project, workspaceId]);
+  }, [isTransitionOwner, onToast, onTransitionSettled, project, workspaceId]);
 
   const refreshDemoSeedStatus = useCallback(async () => {
     try {
@@ -114,18 +140,25 @@ export function useLineageWorkspaces({
 
   async function activateWorkspace(workspaceId: string) {
     if (!workspaceId) return;
+    const token = onBeforeTransition();
+    if (token === null) return;
     const requested = visibleWorkspaces.find(workspace => workspace.id === workspaceId);
     if (!requested) {
+      onTransitionSettled(token, 'failure');
       onWorkspaceUnavailable(`Workspace ${workspaceId} is unavailable in ${project}.`);
       return;
     }
+    if (!isTransitionOwner(token)) return;
     onResetLineage();
+    if (!onTransitionSettled(token, 'success')) return;
     onSelectedAsset(requested.root_asset_id);
     onWorkspaceChange(requested);
     onToast('ok', `Using ${requested.title}`);
   }
 
   async function seedDemoWorkspace(options: { quiet?: boolean } = {}) {
+    const token = onBeforeTransition();
+    if (token === null) return null;
     setWorkspaceLoading(true);
     try {
       const result = await api<{ workspace?: LineageWorkspace; root_asset_id: string }>('/api/lineage-workspaces/demo/seed', {
@@ -133,14 +166,18 @@ export function useLineageWorkspaces({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ project, confirmWrite: true }),
       });
-      onResetLineage();
-      await refreshWorkspaces();
+      if (!isTransitionOwner(token)) return null;
+      const refreshed = await refreshWorkspaces({ transitionToken: token });
+      if (!refreshed) { onTransitionSettled(token, 'failure'); return null; }
       await refreshDemoSeedStatus();
+      if (!isTransitionOwner(token) || !onTransitionSettled(token, 'success')) return null;
       onSelectedAsset(result.workspace?.root_asset_id || result.root_asset_id);
       if (result.workspace) onWorkspaceChange(result.workspace);
       if (!options.quiet) onToast('ok', 'Seeded demo lineage workspace');
       return result;
     } catch (error) {
+      if (!isTransitionOwner(token)) return null;
+      onTransitionSettled(token, 'failure');
       onToast('error', error instanceof Error ? error.message : String(error));
       return null;
     } finally {
@@ -149,6 +186,8 @@ export function useLineageWorkspaces({
   }
 
   async function seedSwissifierDemoWorkspace(options: { quiet?: boolean } = {}) {
+    const token = onBeforeTransition();
+    if (token === null) return null;
     setWorkspaceLoading(true);
     try {
       const result = await api<{ workspace?: LineageWorkspace; root_asset_id: string }>('/api/lineage-workspaces/demo/swissifier/seed', {
@@ -156,14 +195,18 @@ export function useLineageWorkspaces({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ project, confirmWrite: true }),
       });
-      onResetLineage();
-      await refreshWorkspaces();
+      if (!isTransitionOwner(token)) return null;
+      const refreshed = await refreshWorkspaces({ transitionToken: token });
+      if (!refreshed) { onTransitionSettled(token, 'failure'); return null; }
       await refreshDemoSeedStatus();
+      if (!isTransitionOwner(token) || !onTransitionSettled(token, 'success')) return null;
       onSelectedAsset(result.workspace?.root_asset_id || result.root_asset_id);
       if (result.workspace) onWorkspaceChange(result.workspace);
       if (!options.quiet) onToast('ok', 'Seeded Swissifier demo lineage');
       return result;
     } catch (error) {
+      if (!isTransitionOwner(token)) return null;
+      onTransitionSettled(token, 'failure');
       onToast('error', error instanceof Error ? error.message : String(error));
       return null;
     } finally {
@@ -241,6 +284,8 @@ export function useLineageWorkspaces({
     if (!activeWorkspace) return;
     const confirmed = window.confirm(`Archive ${activeWorkspace.title}? This hides it from the picker and clears its next-variation selection.`);
     if (!confirmed) return;
+    const token = onBeforeTransition();
+    if (token === null) return;
     setWorkspaceLoading(true);
     try {
       await api(`/api/lineage-workspaces/${encodeURIComponent(activeWorkspace.id)}/archive`, {
@@ -248,29 +293,36 @@ export function useLineageWorkspaces({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ project, confirmWrite: true }),
       });
-      onResetLineage();
-      await refreshWorkspaces();
+      if (!isTransitionOwner(token)) return;
+      const refreshed = await refreshWorkspaces({ transitionToken: token });
+      if (!refreshed) { onTransitionSettled(token, 'failure'); return; }
       await refreshDemoSeedStatus();
+      if (!isTransitionOwner(token) || !onTransitionSettled(token, 'success')) return;
       onWorkspaceChange(null);
       onToast('ok', `Archived ${activeWorkspace.title}`);
     } catch (error) {
+      if (!isTransitionOwner(token)) return;
+      onTransitionSettled(token, 'failure');
       onToast('error', error instanceof Error ? error.message : String(error));
     } finally {
       setWorkspaceLoading(false);
     }
   }
 
-  function handleWorkspaceCreated(workspace: LineageWorkspace) {
+  function handleWorkspaceCreated(workspace: LineageWorkspace, transitionToken?: number) {
+    const token = transitionToken ?? onBeforeTransition();
+    if (token === null) return false;
+    if (!isTransitionOwner(token) || !onTransitionSettled(token, 'success')) return false;
     setWorkspaceSnapshot(current => ({
       project,
       active_workspace: workspace,
       workspaces: [workspace, ...(current?.workspaces || []).filter(item => item.id !== workspace.id)],
       fetchedAt: new Date().toISOString(),
     }));
-    onResetLineage();
     onSelectedAsset(workspace.root_asset_id);
     onWorkspaceChange(workspace);
     onToast('ok', `Using ${workspace.title}`);
+    return true;
   }
 
   return {

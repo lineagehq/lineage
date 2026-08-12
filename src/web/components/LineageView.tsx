@@ -50,6 +50,7 @@ import { LineageEdgeSummaryDialog, type EdgeSummaryEditAction } from './LineageE
 import { LineageNewWorkspaceModal } from './LineageNewWorkspaceModal';
 import { LineageReplayControls } from './LineageReplayControls';
 import { LineageSidePanel } from './LineageSidePanel';
+import { LineageSocialPanel } from './LineageSocialPanel';
 import { LineageToolbar } from './LineageToolbar';
 import { LineageGenerationSheet } from './LineageGenerationSheet';
 import { LineageVariationPromptDialog, type VariationPromptMode } from './LineageVariationPromptDialog';
@@ -138,28 +139,34 @@ export function LineageView({
   asset,
   newWorkspaceRequest,
   onAssetsChanged,
-  onCanvasPresentationChange,
-  onExitWorkspace,
-  onNewWorkspaceCancelled,
+  onCanvasPresentationChange = () => undefined,
+  onExitWorkspace = () => undefined,
+  onNewWorkspaceCancelled = () => undefined,
+  onSocialDirtyChange,
+  onSocialTransitionPendingChange,
   onSelectedAsset,
   onToast,
-  onWorkspaceChange,
-  onWorkspaceUnavailable,
+  onWorkspaceChange = () => undefined,
+  onWorkspaceUnavailable = () => undefined,
   project,
-  workspaceId,
+  transitionLocked = false,
+  workspaceId = null,
 }: {
   asset?: GrowthAsset;
   newWorkspaceRequest?: number;
   onAssetsChanged?: () => Promise<void> | void;
-  onCanvasPresentationChange: (presentation: LineageCanvasPresentation) => void;
-  onExitWorkspace: () => void;
-  onNewWorkspaceCancelled: () => void;
+  onCanvasPresentationChange?: (presentation: LineageCanvasPresentation) => void;
+  onExitWorkspace?: () => void;
+  onNewWorkspaceCancelled?: () => void;
+  onSocialDirtyChange?: (dirty: boolean) => void;
+  onSocialTransitionPendingChange?: (pending: boolean) => void;
   onSelectedAsset: (assetId: string) => void;
   onToast: (type: 'ok' | 'error', message: string) => void;
-  onWorkspaceChange: (workspace: LineageWorkspace | null) => void;
-  onWorkspaceUnavailable: (message: string) => void;
+  onWorkspaceChange?: (workspace: LineageWorkspace | null) => void;
+  onWorkspaceUnavailable?: (message: string) => void;
   project: string;
-  workspaceId: string | null;
+  transitionLocked?: boolean;
+  workspaceId?: string | null;
 }) {
   const [canvasPresentation, setCanvasPresentation] = useState<LineageCanvasPresentation>(() =>
     lineageCanvasPresentationFromSearch(
@@ -205,8 +212,10 @@ export function LineageView({
   } | null>(null);
   const [nodeMenu, setNodeMenu] = useState<{ assetId: string; x: number; y: number } | null>(null);
   const [newLineageOpen, setNewLineageOpen] = useState(false);
+  const [panelMode, setPanelMode] = useState<'settings' | 'queue' | 'asset' | 'social' | null>(null);
+  const [socialDirty, setSocialDirty] = useState(false);
+  const [socialTransitionPending, setSocialTransitionPending] = useState(false);
   const [externalNewWorkspaceOpen, setExternalNewWorkspaceOpen] = useState(false);
-  const [panelMode, setPanelMode] = useState<'settings' | 'queue' | 'asset' | null>(null);
   const [variationQueuePrimary, setVariationQueuePrimary] = useState<VariationQueueSelection | null>(null);
   const [settingsHintVisible, setSettingsHintVisible] = useState(() => !readCanvasSettingsHintDismissed());
   const [canvasToolsHost, setCanvasToolsHost] = useState<HTMLElement | null>(null);
@@ -275,8 +284,64 @@ export function LineageView({
   const variationLimitSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const variationLimitSaveGenerationRef = useRef(0);
   const panelReturnFocusRef = useRef<HTMLElement | null>(null);
+  const panelReturnFocusAssetIdRef = useRef<string | null>(null);
+  const transitionFocusRef = useRef<HTMLElement | null>(null);
+  const panelModeRef = useRef(panelMode);
+  const socialDirtyRef = useRef(socialDirty);
+  const activeNodeIdRef = useRef(activeNodeId);
+  const snapshotRef = useRef(snapshot);
+  const transitionPendingChangeRef = useRef(onSocialTransitionPendingChange);
+  const socialTransitionPendingRef = useRef(socialTransitionPending || transitionLocked);
+  const transitionGenerationRef = useRef(0);
+  const activeTransitionTokenRef = useRef<number | null>(null);
+  const resetLineageRef = useRef<() => void>(() => undefined);
   const branchMotionRef = useRef<LineageBranchMotion | null>(null);
   const branchMotionTimer = useRef<number | null>(null);
+  panelModeRef.current = panelMode;
+  socialDirtyRef.current = socialDirty;
+  activeNodeIdRef.current = activeNodeId;
+  snapshotRef.current = snapshot;
+  transitionPendingChangeRef.current = onSocialTransitionPendingChange;
+  socialTransitionPendingRef.current = socialTransitionPending || transitionLocked;
+  const allowSocialTransition = useCallback(() => {
+    if (socialTransitionPendingRef.current) return false;
+    if (panelModeRef.current !== 'social' || !socialDirtyRef.current) return true;
+    const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (window.confirm('Discard unsaved Social changes?')) return true;
+    window.setTimeout(() => focused?.focus(), 0);
+    return false;
+  }, []);
+  const beginSocialTransition = useCallback((requireDiscardApproval = true) => {
+    if (socialTransitionPendingRef.current) return null;
+    if (requireDiscardApproval && !allowSocialTransition()) return null;
+    const token = ++transitionGenerationRef.current;
+    activeTransitionTokenRef.current = token;
+    transitionFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    socialTransitionPendingRef.current = true;
+    setSocialTransitionPending(true);
+    transitionPendingChangeRef.current?.(true);
+    return token;
+  }, [allowSocialTransition]);
+  const settleSocialTransition = useCallback((token: number, outcome: 'failure' | 'noop' | 'success') => {
+    if (activeTransitionTokenRef.current !== token) return false;
+    const returnFocus = transitionFocusRef.current;
+    activeTransitionTokenRef.current = null;
+    socialTransitionPendingRef.current = false;
+    setSocialTransitionPending(false);
+    transitionPendingChangeRef.current?.(false);
+    if (outcome === 'success') resetLineageRef.current();
+    else {
+      window.setTimeout(() => returnFocus?.focus(), 0);
+    }
+    transitionFocusRef.current = null;
+    return true;
+  }, []);
+  const isSocialTransitionOwner = useCallback((token: number) => activeTransitionTokenRef.current === token, []);
+  const isSocialTransitionPending = useCallback(() => socialTransitionPendingRef.current, []);
+  useEffect(() => onSocialDirtyChange?.(panelMode === 'social' && socialDirty), [onSocialDirtyChange, panelMode, socialDirty]);
+  useEffect(() => () => onSocialDirtyChange?.(false), [onSocialDirtyChange]);
+  useEffect(() => onSocialTransitionPendingChange?.(socialTransitionPending), [onSocialTransitionPendingChange, socialTransitionPending]);
+  useEffect(() => () => onSocialTransitionPendingChange?.(false), [onSocialTransitionPendingChange]);
   const { fitGraph, markViewportInteraction } = useLineageViewportFit(
     flowApi,
     snapshot?.root_asset_id,
@@ -298,10 +363,19 @@ export function LineageView({
     else next.add(assetId);
     const currentProjection = projectLineageBranches(decoratedSnapshot, collapsedNodeIds);
     const nextProjection = projectLineageBranches(decoratedSnapshot, next);
+    const hidesSocialSource = panelMode === 'social' && Boolean(activeNodeId) && !nextProjection.visibleNodeIds.has(activeNodeId!);
+    if (hidesSocialSource && !allowSocialTransition()) return;
     const motionNodeIds = expanding
       ? setDifference(nextProjection.visibleNodeIds, currentProjection.visibleNodeIds)
       : setDifference(currentProjection.visibleNodeIds, nextProjection.visibleNodeIds);
-    if (activeNodeId && !nextProjection.visibleNodeIds.has(activeNodeId)) setActiveNodeId(null);
+    if (activeNodeId && !nextProjection.visibleNodeIds.has(activeNodeId)) {
+      setActiveNodeId(null);
+      if (hidesSocialSource) {
+        setPanelMode(null);
+        panelReturnFocusRef.current = null;
+        panelReturnFocusAssetIdRef.current = null;
+      }
+    }
     if (motionNodeIds.size === 0) {
       setCollapsedNodeIds(next);
       closeTransientMenus();
@@ -329,7 +403,7 @@ export function LineageView({
       setBranchMotion(null);
     }, reduceReplayMotion ? 1 : branchMotionDuration[motion.phase]);
     closeTransientMenus();
-  }, [activeNodeId, canvasPresentation, closeTransientMenus, collapsedNodeIds, decoratedSnapshot, edgeSummariesVisible, flowEdges, flowNodes, graphDirection, reduceReplayMotion, replaySnapshot]);
+  }, [activeNodeId, allowSocialTransition, canvasPresentation, closeTransientMenus, collapsedNodeIds, decoratedSnapshot, edgeSummariesVisible, flowEdges, flowNodes, graphDirection, panelMode, reduceReplayMotion, replaySnapshot]);
   const resetLineage = useCallback(() => {
     setSnapshot(null);
     setActiveNodeId(null);
@@ -342,7 +416,11 @@ export function LineageView({
     setReplayPhase('settled');
     setReplayStageIndex(-1);
     setCollapsedNodeIds(new Set());
+    setPanelMode(null);
+    panelReturnFocusRef.current = null;
+    panelReturnFocusAssetIdRef.current = null;
   }, []);
+  resetLineageRef.current = resetLineage;
   const refreshNodeTargets = useCallback(async (targetSnapshot: LineageSnapshot | null = snapshot) => {
     if (!targetSnapshot) return;
     const results = await Promise.allSettled(targetSnapshot.nodes.map(node =>
@@ -400,9 +478,12 @@ export function LineageView({
     workspaceRootAssetId,
   } = useLineageWorkspaces({
     asset,
+    isTransitionOwner: isSocialTransitionOwner,
+    onBeforeTransition: () => beginSocialTransition(),
     onResetLineage: resetLineage,
     onSelectedAsset,
     onToast,
+    onTransitionSettled: settleSocialTransition,
     onWorkspaceChange,
     onWorkspaceUnavailable,
     project,
@@ -414,9 +495,11 @@ export function LineageView({
   }, [activeWorkspace?.id, canvasPresentation, onCanvasPresentationChange, workspaceId]);
   workspaceRootRef.current = workspaceRootAssetId;
   useEffect(() => { void refreshDemoSeedStatus(); }, [refreshDemoSeedStatus]);
-  const refresh = useCallback(async (options: { quiet?: boolean; rootAssetId?: string } = {}) => {
+  const refresh = useCallback(async (options: { protectTransition?: boolean; quiet?: boolean; rootAssetId?: string } = {}) => {
     const requestedRoot = options.rootAssetId || workspaceRootAssetId;
     if (!requestedRoot) return false;
+    const token = beginSocialTransition(Boolean(options.protectTransition));
+    if (token === null) return false;
     if (!options.quiet) setLoading(true);
     try {
       const params = new URLSearchParams({ project });
@@ -424,7 +507,19 @@ export function LineageView({
         api<LineageSnapshot>(`/api/lineage/${requestedRoot}?${params.toString()}`),
         api<AgentClaimsResponse>(`/api/agent-claims?${params.toString()}`),
       ]);
-      if (!options.rootAssetId && workspaceRootRef.current !== requestedRoot) return false;
+      if (!options.rootAssetId && workspaceRootRef.current !== requestedRoot) { settleSocialTransition(token, 'failure'); return false; }
+      const prior = snapshotRef.current;
+      const sourceId = activeNodeIdRef.current;
+      const priorSource = prior?.nodes.find(node => node.asset_id === sourceId);
+      const nextSource = next.nodes.find(node => node.asset_id === sourceId);
+      const sourceReplaced = panelModeRef.current === 'social' && Boolean(priorSource)
+        && (!nextSource || priorSource!.checksum_sha256 !== nextSource.checksum_sha256 || prior?.root_asset_id !== next.root_asset_id);
+      if (sourceReplaced && !options.protectTransition && panelModeRef.current === 'social' && socialDirtyRef.current
+        && !window.confirm('Discard unsaved Social changes?')) {
+        settleSocialTransition(token, 'noop');
+        return false;
+      }
+      if (!settleSocialTransition(token, sourceReplaced ? 'success' : 'noop')) return false;
       setSnapshot(next);
       void api<GenerationJobListResponse>(`/api/generation/jobs?${new URLSearchParams({ project, rootAssetId: requestedRoot, limit: '50' }).toString()}`)
         .then(result => {
@@ -436,18 +531,19 @@ export function LineageView({
       setActiveNodeId(current => activeNodeIdAfterRefresh(current, next.nodes, next.active_asset_id, Boolean(options.quiet)));
       return true;
     } catch (error) {
-      if (!options.rootAssetId && workspaceRootRef.current !== requestedRoot) return false;
+      if (!options.rootAssetId && workspaceRootRef.current !== requestedRoot) { settleSocialTransition(token, 'failure'); return false; }
       if (!options.quiet && currentProjectRef.current === project) {
-        setSnapshot(null);
         onToast('error', error instanceof Error ? error.message : String(error));
       }
+      settleSocialTransition(token, 'failure');
       return false;
     } finally {
       if (!options.quiet && currentProjectRef.current === project) setLoading(false);
     }
-  }, [onToast, project, workspaceRootAssetId]);
+  }, [beginSocialTransition, onToast, project, settleSocialTransition, workspaceRootAssetId]);
   const startReplay = useCallback(() => {
     if (!snapshot || !isLineageReplayable(snapshot)) return;
+    if (!allowSocialTransition()) return;
     closeTransientMenus();
     setActiveNodeId(null);
     setDetailNodeId(null);
@@ -459,7 +555,7 @@ export function LineageView({
     setReplayStageIndex(-1);
     setReplayPhase('node');
     setReplayPlaying(true);
-  }, [closeTransientMenus, snapshot]);
+  }, [allowSocialTransition, closeTransientMenus, snapshot]);
   const returnToLive = useCallback(() => {
     setReplaySnapshot(null);
     setReplayStageIndex(-1);
@@ -600,16 +696,28 @@ export function LineageView({
     if (selectedNodes.length > 0) return mutateLineage('/api/selection', { rootAssetId: snapshot.root_asset_id, clear: true, confirmWrite: true }, 'Removed all assets from next variation');
   }
   const closePanel = useCallback(() => {
-    const returnFocus = panelReturnFocusRef.current;
+    if (!allowSocialTransition()) return false;
     setPanelMode(null);
+    const returnElement = panelReturnFocusRef.current;
+    const returnAssetId = panelReturnFocusAssetIdRef.current;
+    window.setTimeout(() => {
+      const returnTarget = returnElement?.isConnected && returnElement !== document.body ? returnElement : returnAssetId
+        ? [...document.querySelectorAll<HTMLElement>('.react-flow__node')]
+          .find(element => element.dataset.id === returnAssetId)?.querySelector<HTMLElement>('.lineage-node') || null
+        : null;
+      returnTarget?.focus();
+    }, 0);
     panelReturnFocusRef.current = null;
-    window.requestAnimationFrame(() => returnFocus?.focus());
-  }, []);
+    panelReturnFocusAssetIdRef.current = null;
+    return true;
+  }, [allowSocialTransition]);
   function dismissSettingsHint() {
     setSettingsHintVisible(false);
     writeCanvasSettingsHintDismissed();
   }
   function togglePanel(mode: 'settings' | 'queue' | 'asset') {
+    const nonSocialSettingsInteraction = mode === 'settings' && panelModeRef.current !== 'social';
+    if (!nonSocialSettingsInteraction && !allowSocialTransition()) return;
     if (mode === 'settings') dismissSettingsHint();
     const invokingControl = document.activeElement;
     if (invokingControl instanceof HTMLElement) panelReturnFocusRef.current = invokingControl;
@@ -622,10 +730,31 @@ export function LineageView({
     });
   }
   function openAssetPanel(assetId: string) {
+    if (!allowSocialTransition()) return false;
     const invokingControl = document.activeElement;
     if (invokingControl instanceof HTMLElement) panelReturnFocusRef.current = invokingControl;
     setActiveNodeId(assetId);
     setPanelMode('asset');
+    return true;
+  }
+  function openSocialPanel(node: LineageNode) {
+    if (panelMode === 'social' && activeNodeId === node.asset_id) {
+      document.querySelector<HTMLElement>('#lineage-canvas-panel [aria-label="Close Social composition"]')?.focus();
+      return true;
+    }
+    if (!allowSocialTransition()) return false;
+    const invokingControl = document.activeElement;
+    if (invokingControl instanceof HTMLElement) {
+      const canvasNode = [...document.querySelectorAll<HTMLElement>('.react-flow__node')]
+        .find(element => element.dataset.id === node.asset_id)?.querySelector<HTMLElement>('.lineage-node');
+      panelReturnFocusRef.current = invokingControl.closest('[role="menu"]')
+        ? canvasNode || invokingControl
+        : invokingControl;
+    }
+    panelReturnFocusAssetIdRef.current = node.asset_id;
+    setActiveNodeId(node.asset_id);
+    setPanelMode('social');
+    return true;
   }
   async function markReview(reviewState: AssetReviewState, assetId = activeNode?.asset_id) {
     if (!assetId) return;
@@ -816,14 +945,12 @@ export function LineageView({
     variationLimitSaveQueueRef.current = queued;
     await queued;
   }
-  async function toggleSocial(node: LineageNode) {
+  async function markSocial(node: LineageNode) {
     if (!snapshot) return;
-    const active = node.social_mark?.active === true;
-    const suffix = active ? '/unmark' : '';
-    await mutateLineage(`/api/lineage/${snapshot.root_asset_id}/social-marks/${node.asset_id}${suffix}`, {
+    await mutateLineage(`/api/lineage/${snapshot.root_asset_id}/social-marks/${node.asset_id}`, {
       actor: 'human:canvas',
       confirmWrite: true,
-    }, active ? `Unmarked ${node.asset_id} from Social` : `Marked ${node.asset_id} for Social`);
+    }, `Marked ${node.asset_id} for Social`);
   }
   function nodeElementForDiscussion(nodeId: string): HTMLElement | null {
     return Array.from(document.querySelectorAll<HTMLElement>('.lineage-node[data-asset-id]'))
@@ -1152,8 +1279,8 @@ export function LineageView({
   }, [refresh]);
 
   useEffect(() => {
-    if (!workspaceRootAssetId) resetLineage();
-  }, [resetLineage, workspaceRootAssetId]);
+    if (!workspaceRootAssetId && allowSocialTransition()) resetLineage();
+  }, [allowSocialTransition, resetLineage, workspaceRootAssetId]);
 
   useEffect(() => {
     if (!snapshot) return undefined;
@@ -1278,8 +1405,13 @@ export function LineageView({
   const handleCanvasKeyDown = useCallback((event: KeyboardEvent) => {
     if (event.key === 'Escape') {
       if (event.target instanceof HTMLElement && event.target.closest('.lineage-variation-editor')) return;
+      if (panelMode) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (closePanel()) closeTransientMenus();
+        return;
+      }
       closeTransientMenus();
-      if (panelMode) closePanel();
     }
   }, [closePanel, closeTransientMenus, panelMode]);
 
@@ -1334,7 +1466,7 @@ export function LineageView({
     setWorkspaceProgress('ready');
   }, [flowNodes.length, graphKey, renderedGraph.nodes.length, snapshot, workspaceProgress]);
 
-  useEscapeClear(Boolean(activeNodeId), clearFocus);
+  useEscapeClear(Boolean(activeNodeId && !panelMode), clearFocus);
 
   useEffect(() => {
     resetLineage();
@@ -1362,7 +1494,7 @@ export function LineageView({
           onIndexLocal={() => void indexAndRefresh()}
           onOpenGeneration={() => setGenerationOpen(true)}
           onOpenOutputDefaults={() => setOutputDefaultsOpen(true)}
-          onRefreshLineage={() => void refresh()}
+          onRefreshLineage={() => void refresh({ protectTransition: true })}
           onRefreshWorkspaces={() => void refreshWorkspaces()}
           onReplayGrowth={startReplay}
           onRestoreDemoMedia={() => void restoreDemoSeedMedia()}
@@ -1442,11 +1574,14 @@ export function LineageView({
             onBrowseWorkspaces={onExitWorkspace}
             onEdgesChange={handleEdgesChange}
             onEdgeEdit={(edgeId, returnFocus) => setEdgeEditor({ edgeId, returnFocus })}
-            onClearFocus={clearFocus}
+            onClearFocus={() => { if (allowSocialTransition()) clearFocus(); }}
             onIndexNow={() => void indexAndRefresh()}
             onSeedDemo={() => void seedDemoAndRefreshAssets()}
             onNodeActionMenu={(assetId, x, y) => setNodeMenu(assetId ? { assetId, x, y } : null)}
-            onNodeInspect={assetId => { closeTransientMenus(); setActiveNodeId(assetId); }}
+            onNodeInspect={assetId => {
+              if (!allowSocialTransition()) return false;
+              closeTransientMenus(); setActiveNodeId(assetId); return true;
+            }}
             onNodeOpenDetail={openAssetPanel}
             onNodeOpenHistory={assetId => void openAttemptHistory(assetId)}
             onNodePosition={node => {
@@ -1462,7 +1597,7 @@ export function LineageView({
             onToggleBranch={toggleBranch}
             onToggleReroll={toggleReroll}
             onToggleDiscussion={toggleDiscussion}
-            onToggleSocial={toggleSocial}
+            onToggleSocial={openSocialPanel}
             onViewportInteraction={markViewportInteraction}
             replayInteractive={!replaySnapshot || replayAtEnd}
             selectedCount={selectedNodes.length}
@@ -1495,7 +1630,7 @@ export function LineageView({
             </div>
           )}
         </div>
-        {panelMode && (
+        {panelMode && panelMode !== 'social' && (
           <button
             aria-label="Close Canvas panel"
             className="lineage-panel-backdrop"
@@ -1600,7 +1735,20 @@ export function LineageView({
             snapshot={snapshot}
           />
         )}
-        {nodeMenu && menuNode && snapshot && <LineageContextMenu canRemoveFromLineage={menuNode.asset_id !== snapshot.root_asset_id} claims={lineageWorkspaceClaims(claims, project, snapshot.root_asset_id)} node={menuNode} onClaimControl={(action, claim, body) => { void controlClaim(action, claim, body); }} onClearAllNext={() => void clearNextVariation()} onClearNext={() => void clearNextVariation(menuNode.asset_id)} onClearReroll={() => void clearReroll(menuNode)} onClose={() => setNodeMenu(null)} onEditDiscussionNote={() => openDiscussionDialog(menuNode, 'edit')} onEditOutputTargets={() => setTargetNodeId(menuNode.asset_id)} onMarkReroll={() => void requestRerollAction(menuNode)} onOpenDetail={() => openAssetPanel(menuNode.asset_id)} onRemoveFromLineage={() => void removeNodeFromLineage(menuNode)} onReplaceNext={() => void requestBranchAction(menuNode, 'replace')} onReview={reviewState => void markReview(reviewState, menuNode.asset_id)} onSelectNext={() => void requestBranchAction(menuNode, 'add')} onToggleDiscussion={() => void toggleDiscussion(menuNode)} onToggleSocial={() => void toggleSocial(menuNode)} position={nodeMenu} selectedCount={selectedNodes.length} selectionFull={selectionFull} />}
+        {panelMode === 'social' && snapshot && activeNode && (
+          <LineageSocialPanel
+            isTransitionLocked={isSocialTransitionPending}
+            key={`${snapshot.root_asset_id}:${activeNode.asset_id}`}
+            node={activeNode}
+            onClose={closePanel}
+            onDirtyChange={setSocialDirty}
+            onMark={() => markSocial(activeNode)}
+            project={project}
+            rootAssetId={snapshot.root_asset_id}
+            transitionLocked={socialTransitionPending || transitionLocked}
+          />
+        )}
+        {nodeMenu && menuNode && snapshot && <LineageContextMenu canRemoveFromLineage={menuNode.asset_id !== snapshot.root_asset_id} claims={lineageWorkspaceClaims(claims, project, snapshot.root_asset_id)} node={menuNode} onClaimControl={(action, claim, body) => { void controlClaim(action, claim, body); }} onClearAllNext={() => void clearNextVariation()} onClearNext={() => void clearNextVariation(menuNode.asset_id)} onClearReroll={() => void clearReroll(menuNode)} onClose={() => setNodeMenu(null)} onEditDiscussionNote={() => openDiscussionDialog(menuNode, 'edit')} onEditOutputTargets={() => setTargetNodeId(menuNode.asset_id)} onMarkReroll={() => void requestRerollAction(menuNode)} onOpenDetail={() => openAssetPanel(menuNode.asset_id)} onRemoveFromLineage={() => void removeNodeFromLineage(menuNode)} onReplaceNext={() => void requestBranchAction(menuNode, 'replace')} onReview={reviewState => void markReview(reviewState, menuNode.asset_id)} onSelectNext={() => void requestBranchAction(menuNode, 'add')} onToggleDiscussion={() => void toggleDiscussion(menuNode)} onToggleSocial={() => openSocialPanel(menuNode)} position={nodeMenu} selectedCount={selectedNodes.length} selectionFull={selectionFull} />}
       </div>
       {historyNode && snapshot && (
         <LineageAttemptHistoryModal

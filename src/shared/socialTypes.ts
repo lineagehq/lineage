@@ -19,6 +19,37 @@ interface SocialHashtag {
   value: string;
 }
 
+interface SocialChannelCapability {
+  automatic: boolean;
+  image_post: boolean;
+  notification: boolean;
+  scheduling_modes: SocialCompositionMode[];
+  supported: boolean;
+  reason: string | null;
+}
+
+export interface SocialBufferConnection {
+  project: string;
+  organization_id: string;
+  health_state: 'connected' | 'credential_missing' | 'organization_mismatch';
+  channel_synced_at: string | null;
+  updated_at: string;
+}
+
+export interface SocialBufferChannel {
+  channel_id: string;
+  service: string;
+  display_name: string;
+  timezone: string | null;
+  disconnected: boolean;
+  locked: boolean;
+  paused: boolean;
+  available: boolean;
+  capability: SocialChannelCapability;
+  synced_at: string;
+  stale_at: string | null;
+}
+
 export interface SocialVariantRevision {
   id: string;
   variant_id: string;

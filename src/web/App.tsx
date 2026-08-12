@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AssetLibrarySnapshot, GrowthAsset, MutationResponse, PresignResponse, ProjectSummary } from '../shared/types';
 import type { LineageRuntimeInfo } from '../shared/runtimeInfoTypes';
 import { api } from './api';
@@ -30,6 +30,10 @@ function initialProjectFromUrl(): string {
   return new URLSearchParams(window.location.search).get('project') || defaultProject;
 }
 
+function confirmLineageSocialTransition(dirty: boolean, confirmDiscard: () => boolean): boolean {
+  return !dirty || confirmDiscard();
+}
+
 export function App() {
   const [snapshot, setSnapshot] = useState<AssetLibrarySnapshot | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -59,6 +63,43 @@ export function App() {
   const [runtimeIdentityUnavailable, setRuntimeIdentityUnavailable] = useState(false);
   const [contextPanelOpen, setContextPanelOpen] = useState(readContextPanelOpen);
   const [mobileContextOpen, setMobileContextOpen] = useState(false);
+  const [appTransitionPending, setAppTransitionPending] = useState(false);
+  const lineageSocialDirtyRef = useRef(false);
+  const lineageChildTransitionPendingRef = useRef(false);
+  const appTransitionGenerationRef = useRef(0);
+  const activeAppTransitionTokenRef = useRef<number | null>(null);
+  const projectCatalogGenerationRef = useRef(0);
+  const projectRef = useRef(project);
+  const [lineageResetGeneration, setLineageResetGeneration] = useState(0);
+  projectRef.current = project;
+  const updateLineageSocialDirty = useCallback((dirty: boolean) => {
+    lineageSocialDirtyRef.current = dirty;
+  }, []);
+  const updateLineageChildTransitionPending = useCallback((pending: boolean) => {
+    lineageChildTransitionPendingRef.current = pending;
+  }, []);
+  const allowLineageTransition = useCallback(() => activeAppTransitionTokenRef.current === null && !lineageChildTransitionPendingRef.current && confirmLineageSocialTransition(lineageSocialDirtyRef.current, () => window.confirm('Discard unsaved Social changes?')), []);
+  const beginAppTransition = useCallback(() => {
+    if (!allowLineageTransition()) return null;
+    const token = ++appTransitionGenerationRef.current;
+    activeAppTransitionTokenRef.current = token;
+    setAppTransitionPending(true);
+    return token;
+  }, [allowLineageTransition]);
+  const settleAppTransition = useCallback((token: number) => {
+    if (activeAppTransitionTokenRef.current !== token) return false;
+    activeAppTransitionTokenRef.current = null;
+    setAppTransitionPending(false);
+    return true;
+  }, []);
+  const changeProject = useCallback((nextProject: string) => {
+    if (nextProject === project || !allowLineageTransition()) return;
+    setProject(nextProject);
+  }, [allowLineageTransition, project]);
+  const changeView = useCallback((nextView: StudioView) => {
+    if (nextView === view || !allowLineageTransition()) return;
+    setView(nextView);
+  }, [allowLineageTransition, view]);
   const setDesktopContextPanelOpen = useCallback((open: boolean) => {
     setContextPanelOpen(open);
     writeContextPanelOpen(open);
@@ -88,11 +129,24 @@ export function App() {
     [projectSnapshot]
   );
   async function refreshProjects() {
+    const requestGeneration = ++projectCatalogGenerationRef.current;
     try {
       const result = await api<{ projects: ProjectSummary[] }>('/api/projects');
+      if (requestGeneration !== projectCatalogGenerationRef.current) return;
       setProjects(result.projects);
-      setProject(current => (result.projects.some(item => item.project === current) ? current : result.projects[0]?.project || defaultProject));
+      const currentProject = projectRef.current;
+      const fallbackProject = result.projects.some(item => item.project === currentProject) ? currentProject : result.projects[0]?.project || defaultProject;
+      if (fallbackProject === currentProject) return;
+      const token = beginAppTransition();
+      if (token === null) return;
+      if (requestGeneration !== projectCatalogGenerationRef.current || projectRef.current !== currentProject) {
+        settleAppTransition(token);
+        return;
+      }
+      if (!settleAppTransition(token)) return;
+      setProject(fallbackProject);
     } catch (error) {
+      if (requestGeneration !== projectCatalogGenerationRef.current) return;
       setToast({ type: 'error', message: error instanceof Error ? error.message : String(error) });
     }
   }
@@ -222,6 +276,7 @@ export function App() {
     }
   }
   function showBackupQueue() {
+    if (!allowLineageTransition()) return;
     setSource('local');
     setStatus('all');
     setPlacementStatus('all');
@@ -229,8 +284,9 @@ export function App() {
     setView('backup');
   }
   async function openAgentWork(target: AgentWorkTarget) {
+    const token = beginAppTransition();
+    if (token === null) return;
     try {
-      if (target.assetId) setSelectedId(target.assetId);
       if (target.view === 'lineage' && target.workspaceId) {
         await api(`/api/lineage-workspaces/${encodeURIComponent(target.workspaceId)}/activate`, {
           method: 'POST',
@@ -238,10 +294,14 @@ export function App() {
           body: JSON.stringify({ project, confirmWrite: true }),
         });
       }
+      if (!settleAppTransition(token)) return;
+      if (target.assetId) setSelectedId(target.assetId);
       setAssetDetailsOpen(false);
+      if (target.view === 'lineage') setLineageResetGeneration(current => current + 1);
       setView(target.view);
       setToast({ type: 'ok', message: `Opened ${target.claim.target_title || target.claim.target_id}` });
     } catch (error) {
+      if (!settleAppTransition(token)) return;
       setToast({ type: 'error', message: error instanceof Error ? error.message : String(error) });
     }
   }
@@ -331,11 +391,11 @@ export function App() {
         runtimeIdentityUnavailable={runtimeIdentityUnavailable}
         setChannel={setChannel}
         setPlacementStatus={setPlacementStatus}
-        setProject={setProject}
+        setProject={changeProject}
         setSource={setSource}
         setStatus={setStatus}
         setUploadOpen={setUploadOpen}
-        setView={setView}
+        setView={changeView}
         showBackupQueue={showBackupQueue}
         source={source}
         status={status}
@@ -425,10 +485,14 @@ export function App() {
         ) : view === 'settings' ? <SettingsView onToast={showToast} project={project} /> : (
           <LineageView
             asset={selected}
+            key={`${project}:${lineageResetGeneration}`}
             onAssetsChanged={refresh}
+            onSocialDirtyChange={updateLineageSocialDirty}
+            onSocialTransitionPendingChange={updateLineageChildTransitionPending}
             onSelectedAsset={setSelectedId}
             onToast={showToast}
             project={project}
+            transitionLocked={appTransitionPending}
           />
         )}
       </main>

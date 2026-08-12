@@ -35,6 +35,61 @@ button {
   cursor: pointer;
 }
 
+.lineage-social-panel {
+  width: min(440px, calc(100% - 24px));
+  overscroll-behavior: contain;
+}
+
+.lineage-social-panel h4 { margin: 8px 0; }
+.lineage-social-panel textarea { resize: vertical; }
+.lineage-social-panel label:not(.lineage-social-check),
+.lineage-social-form { display: grid; gap: 6px; }
+.lineage-social-panel input:not([type='checkbox'], [type='radio']),
+.lineage-social-panel select,
+.lineage-social-panel textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 8px;
+}
+.lineage-social-source code { overflow-wrap: anywhere; }
+.lineage-social-alert,
+.lineage-social-step,
+.lineage-social-item,
+.lineage-social-validation {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  padding: 10px;
+}
+.lineage-social-alert.error { border-color: var(--danger); }
+.lineage-social-alert-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.lineage-social-channel-list,
+.lineage-social-variant-tabs { display: grid; gap: 7px; }
+.lineage-social-channel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  padding: 7px 0;
+}
+.lineage-social-channel span { display: grid; min-width: 0; }
+.lineage-social-channel small { color: var(--muted); }
+.lineage-social-variant-tabs { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+.lineage-social-variant-tabs [aria-current='true'] { border-color: var(--accent); color: var(--accent); }
+.lineage-social-form fieldset { border: 1px solid var(--line); border-radius: 6px; }
+.lineage-social-form .lineage-social-fields { display: grid; gap: 6px; border: 0; padding: 0; }
+.lineage-social-check { display: flex; gap: 7px; align-items: center; }
+.lineage-social-unsaved { color: #875b00; font-weight: 700; }
+
+@media (max-width: 700px) {
+  .lineage-social-panel { width: 100%; max-height: min(82vh, 720px); }
+  .lineage-social-channel { grid-template-columns: 1fr; }
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: 344px minmax(0, 1fr);

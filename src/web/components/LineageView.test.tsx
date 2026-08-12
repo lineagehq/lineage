@@ -38,15 +38,34 @@ vi.mock('./useLineageWorkspaces', () => {
 vi.mock('./LineageCanvas', async () => {
   const React = await import('react');
   return {
-    LineageCanvas: (props: { flowNodes: Array<{ data: LineageNode }>; onToggleSocial: (node: LineageNode) => void }) => {
+    LineageCanvas: (props: { flowNodes: Array<{ data: LineageNode }>; onNodeInspect: (assetId: string) => boolean | void; onSelectedAsset: (assetId: string) => void; onToggleCollapse: (assetId: string) => void; onToggleSocial: (node: LineageNode) => void }) => {
       const node = props.flowNodes[0]?.data;
-      return React.createElement('button', {
-        'data-social-state': node?.social_mark?.active ? 'marked' : 'unmarked',
-        'data-testid': 'social-toggle',
-        disabled: !node,
-        onClick: () => node && props.onToggleSocial(node),
-      }, 'Toggle Social');
+      const other = props.flowNodes[1]?.data;
+      return React.createElement(React.Fragment, null,
+        React.createElement('div', { className: 'react-flow__node', 'data-id': node?.asset_id }, React.createElement('button', {
+          className: 'lineage-node',
+          'data-social-state': node?.social_mark?.active ? 'marked' : 'unmarked',
+          'data-testid': 'social-toggle',
+          disabled: !node,
+          onClick: () => node && props.onToggleSocial(node),
+        }, 'Toggle Social')),
+        other && React.createElement('button', {
+          'data-testid': 'switch-social-source',
+          onClick: () => { if (props.onNodeInspect(other.asset_id) !== false) props.onSelectedAsset(other.asset_id); },
+        }, 'Switch source'),
+        React.createElement('button', { 'data-testid': 'collapse-social-source', onClick: () => props.onToggleCollapse('social-root') }, 'Collapse source'));
     },
+  };
+});
+
+vi.mock('./LineageSocialPanel', async () => {
+  const React = await import('react');
+  return {
+    LineageSocialPanel: (props: { node: LineageNode; onClose?: () => void; onDirtyChange: (dirty: boolean) => void; onMark: () => void; transitionLocked?: boolean }) => React.createElement('section', { 'aria-busy': props.transitionLocked || undefined, 'data-testid': 'social-panel', id: 'lineage-canvas-panel' },
+      React.createElement('span', null, props.node.title),
+      React.createElement('button', { 'aria-label': 'Close Social composition', onClick: props.onClose }, 'Close'),
+      !props.node.social_mark?.active && React.createElement('button', { 'data-testid': 'mark-social', onClick: props.onMark }, 'Mark for Social'),
+      React.createElement('button', { 'data-testid': 'make-social-dirty', disabled: props.transitionLocked, onClick: () => props.onDirtyChange(true) }, 'Edit draft')),
   };
 });
 
@@ -59,14 +78,15 @@ afterEach(() => {
   container?.remove();
   container = null;
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 function snapshot(marked: boolean): LineageSnapshot {
   return {
     active_asset_id: 'social-root',
-    edges: [],
+    edges: [{ child_asset_id: 'social-other', created_at: '2026-08-11T20:00:00.000Z', id: 'edge-social', parent_asset_id: 'social-root', relation_type: 'derived_from' }],
     fetchedAt: marked ? '2026-08-11T20:00:01.000Z' : '2026-08-11T20:00:00.000Z',
-    latest: ['social-root'],
+    latest: ['social-root', 'social-other'],
     nodes: [{
       asset_id: 'social-root',
       is_latest: true,
@@ -87,6 +107,16 @@ function snapshot(marked: boolean): LineageSnapshot {
       status: 'working',
       title: 'Social root',
       user_selected: false,
+    }, {
+      asset_id: 'social-other',
+      is_latest: true,
+      media_type: 'image',
+      project: 'demo-project',
+      review_state: 'unreviewed',
+      source: 'local',
+      status: 'working',
+      title: 'Other source',
+      user_selected: false,
     }],
     project: 'demo-project',
     root_asset_id: 'social-root',
@@ -102,9 +132,127 @@ async function flush(): Promise<void> {
     await new Promise(resolve => setTimeout(resolve, 0));
   });
 }
+function deferred<T>() { let resolve!: (value: T) => void; let reject!: (reason: unknown) => void; const promise = new Promise<T>((next, fail) => { resolve = next; reject = fail; }); return { promise, reject, resolve }; }
 
 describe('LineageView Social-mark integration', () => {
-  it('keeps the interaction unmarked until the authoritative persisted reload returns', async () => {
+  it('coordinates automatic source replacement at response time without stale approval', async () => {
+    vi.useFakeTimers();
+    let reads = 0;
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path.startsWith('/api/lineage/social-root?')) {
+        reads += 1;
+        if (reads === 1) return Promise.resolve(snapshot(true));
+        const next = snapshot(true); next.nodes = next.nodes.map(node => node.asset_id === 'social-root' ? { ...node, checksum_sha256: 'automatic-replacement' } : node);
+        return Promise.resolve(next);
+      }
+      if (path.startsWith('/api/agent-claims?')) return Promise.resolve({ claims: [] });
+      if (path.startsWith('/api/generation/jobs?')) return Promise.resolve({ jobs: [] });
+      if (path.startsWith('/api/generation/targets?')) return Promise.resolve({ effective: null, setting: null });
+      return Promise.resolve({});
+    });
+    container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+    await act(async () => { root!.render(createElement(LineageView, { onSelectedAsset: vi.fn(), onToast: vi.fn(), project: 'demo-project' })); await Promise.resolve(); await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); });
+    act(() => container!.querySelector<HTMLButtonElement>('[data-testid="social-toggle"]')!.click());
+    act(() => container!.querySelector<HTMLButtonElement>('[data-testid="make-social-dirty"]')!.click());
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    await act(async () => { vi.advanceTimersByTime(8000); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="social-panel"]')).not.toBeNull();
+    confirm.mockReturnValue(true);
+    await act(async () => { vi.advanceTimersByTime(8000); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="social-panel"]')).toBeNull();
+  });
+
+  it('locks a deferred manual refresh, preserves and unlocks on failure, and resets once on replacement success', async () => {
+    const failedRefresh = deferred<LineageSnapshot>();
+    const noOpRefresh = deferred<LineageSnapshot>();
+    const successfulRefresh = deferred<LineageSnapshot>();
+    let reads = 0;
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path.startsWith('/api/lineage/social-root?')) {
+        reads += 1;
+        if (reads === 1) return Promise.resolve(snapshot(true));
+        if (reads === 2) return failedRefresh.promise;
+        if (reads === 3) return noOpRefresh.promise;
+        return successfulRefresh.promise;
+      }
+      if (path.startsWith('/api/agent-claims?')) return Promise.resolve({ claims: [] });
+      if (path.startsWith('/api/generation/jobs?')) return Promise.resolve({ jobs: [] });
+      if (path.startsWith('/api/generation/targets?')) return Promise.resolve({ effective: null, setting: null });
+      return Promise.resolve({});
+    });
+    const tools = document.createElement('div'); tools.id = 'canvas-context-tools'; document.body.appendChild(tools);
+    container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+    act(() => root!.render(createElement(LineageView, { onSelectedAsset: vi.fn(), onToast: vi.fn(), project: 'demo-project' })));
+    await flush(); await flush();
+    act(() => container!.querySelector<HTMLButtonElement>('[data-testid="social-toggle"]')!.click()); await flush();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const refresh = [...tools.querySelectorAll('button')].find(button => button.textContent === 'Refresh graph')!;
+    refresh.focus(); act(() => refresh.click()); await flush();
+    expect(container.querySelector('[data-testid="social-panel"]')?.getAttribute('aria-busy')).toBe('true');
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="make-social-dirty"]')?.disabled).toBe(true);
+    await act(async () => failedRefresh.reject(new Error('refresh failed'))); await flush();
+    expect(container.querySelector('[data-testid="social-panel"]')).not.toBeNull();
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="make-social-dirty"]')?.disabled).toBe(false);
+    expect(document.activeElement).toBe(refresh);
+
+    act(() => container!.querySelector<HTMLButtonElement>('[data-testid="make-social-dirty"]')!.click()); await flush();
+    act(() => refresh.click()); await flush();
+    await act(async () => noOpRefresh.resolve(snapshot(true))); await flush();
+    expect(container.querySelector('[data-testid="social-panel"]')).not.toBeNull();
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="make-social-dirty"]')?.disabled).toBe(false);
+
+    act(() => refresh.click()); await flush();
+    const replaced = snapshot(true); replaced.nodes = replaced.nodes.map(node => node.asset_id === 'social-root' ? { ...node, checksum_sha256: 'replacement' } : node);
+    await act(async () => successfulRefresh.resolve(replaced)); await flush();
+    expect(container.querySelector('[data-testid="social-panel"]')).toBeNull();
+    tools.remove();
+  });
+
+  it('blocks Social entry while a closed-panel refresh transaction owns the view', async () => {
+    const refreshResponse = deferred<LineageSnapshot>(); let reads = 0;
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path.startsWith('/api/lineage/social-root?')) return ++reads === 1 ? Promise.resolve(snapshot(true)) : refreshResponse.promise;
+      if (path.startsWith('/api/agent-claims?')) return Promise.resolve({ claims: [] });
+      if (path.startsWith('/api/generation/jobs?')) return Promise.resolve({ jobs: [] });
+      if (path.startsWith('/api/generation/targets?')) return Promise.resolve({ effective: null, setting: null });
+      return Promise.resolve({});
+    });
+    const tools = document.createElement('div'); tools.id = 'canvas-context-tools'; document.body.appendChild(tools);
+    container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+    act(() => root!.render(createElement(LineageView, { onSelectedAsset: vi.fn(), onToast: vi.fn(), project: 'demo-project' }))); await flush(); await flush();
+    const refresh = [...tools.querySelectorAll('button')].find(button => button.textContent === 'Refresh graph')!;
+    act(() => refresh.click()); await flush();
+    act(() => container!.querySelector<HTMLButtonElement>('[data-testid="social-toggle"]')!.click());
+    expect(container.querySelector('[data-testid="social-panel"]')).toBeNull();
+    await act(async () => refreshResponse.reject(new Error('closed refresh failed'))); await flush();
+    act(() => container!.querySelector<HTMLButtonElement>('[data-testid="social-toggle"]')!.click());
+    expect(container.querySelector('[data-testid="social-panel"]')).not.toBeNull();
+    tools.remove();
+  });
+
+  it('owns the create-workspace flow from modal entry through cancellation', async () => {
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path.startsWith('/api/lineage/social-root?')) return Promise.resolve(snapshot(true));
+      if (path.startsWith('/api/agent-claims?')) return Promise.resolve({ claims: [] });
+      if (path.startsWith('/api/generation/jobs?')) return Promise.resolve({ jobs: [] });
+      if (path.startsWith('/api/generation/targets?')) return Promise.resolve({ effective: null, setting: null });
+      return Promise.resolve({ assets: [] });
+    });
+    const tools = document.createElement('div'); tools.id = 'canvas-context-tools'; document.body.appendChild(tools);
+    container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+    act(() => root!.render(createElement(LineageView, { onSelectedAsset: vi.fn(), onToast: vi.fn(), project: 'demo-project' }))); await flush(); await flush();
+    act(() => [...tools.querySelectorAll('button')].find(button => button.textContent === 'New lineage')!.click());
+    expect(container.querySelector('[aria-label="New lineage"]')).not.toBeNull();
+    act(() => container!.querySelector<HTMLButtonElement>('[data-testid="social-toggle"]')!.click());
+    expect(container.querySelector('[data-testid="social-panel"]')).toBeNull();
+    act(() => [...container!.querySelectorAll('button')].find(button => button.textContent === 'Cancel')!.click()); await flush();
+    act(() => container!.querySelector<HTMLButtonElement>('[data-testid="social-toggle"]')!.click());
+    expect(container.querySelector('[data-testid="social-panel"]')).not.toBeNull();
+    tools.remove();
+  });
+
+  it('opens composition while keeping the source visible and marks only after the authoritative reload', async () => {
     const apiMock = vi.mocked(api);
     let lineageReads = 0;
     let resolveReload!: () => void;
@@ -126,8 +274,9 @@ describe('LineageView Social-mark integration', () => {
     document.body.appendChild(container);
     root = createRoot(container);
     const onToast = vi.fn();
+    const onSelectedAsset = vi.fn();
     act(() => root!.render(createElement(LineageView, {
-      onSelectedAsset: vi.fn(),
+      onSelectedAsset,
       onToast,
       project: 'demo-project',
     })));
@@ -138,7 +287,11 @@ describe('LineageView Social-mark integration', () => {
 
     act(() => toggle.click());
     await flush();
+    expect(container.querySelector('[data-testid="social-panel"]')?.textContent).toContain('Social root');
+    expect(container.querySelector('.lineage-panel-backdrop')).toBeNull();
     expect(toggle.dataset.socialState).toBe('unmarked');
+    act(() => container!.querySelector<HTMLButtonElement>('[data-testid="mark-social"]')!.click());
+    await flush();
     expect(lineageReads).toBe(2);
     expect(apiMock).toHaveBeenCalledWith('/api/lineage/social-root/social-marks/social-root', expect.objectContaining({
       body: JSON.stringify({ project: 'demo-project', actor: 'human:canvas', confirmWrite: true }),
@@ -149,5 +302,40 @@ describe('LineageView Social-mark integration', () => {
     await flush();
     expect(toggle.dataset.socialState).toBe('marked');
     expect(onToast).toHaveBeenCalledWith('ok', 'Marked social-root for Social');
+
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const dirtyButton = container!.querySelector<HTMLButtonElement>('[data-testid="make-social-dirty"]')!;
+    dirtyButton.focus();
+    act(() => dirtyButton.click());
+    await flush();
+    act(() => toggle.click());
+    const closeSocial = container!.querySelector<HTMLButtonElement>('[aria-label="Close Social composition"]');
+    expect(confirm).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(closeSocial);
+    act(() => container!.querySelector('[data-testid="social-panel"]')!.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' })));
+    expect(confirm).toHaveBeenCalledWith('Discard unsaved Social changes?');
+    expect(container.querySelector('[data-testid="social-panel"]')).not.toBeNull();
+    expect(document.activeElement).toBe(closeSocial);
+
+    act(() => container!.querySelector<HTMLButtonElement>('[data-testid="switch-social-source"]')!.click());
+    expect(container.querySelector('[data-testid="social-panel"]')?.textContent).toContain('Social root');
+    expect(onSelectedAsset).not.toHaveBeenCalled();
+
+    confirm.mockReturnValue(true);
+    act(() => container!.querySelector<HTMLButtonElement>('[data-testid="switch-social-source"]')!.click());
+    await flush();
+    expect(container.querySelector('[data-testid="social-panel"]')?.textContent).toContain('Other source');
+    expect(onSelectedAsset).toHaveBeenCalledWith('social-other');
+    const otherDirty = container!.querySelector<HTMLButtonElement>('[data-testid="make-social-dirty"]')!;
+    act(() => otherDirty.click()); await flush();
+    confirm.mockReturnValue(false);
+    const collapse = container!.querySelector<HTMLButtonElement>('[data-testid="collapse-social-source"]')!;
+    collapse.focus(); act(() => collapse.click());
+    expect(container.querySelector('[data-testid="social-panel"]')?.textContent).toContain('Other source');
+    expect(document.activeElement).toBe(collapse);
+    confirm.mockReturnValue(true); act(() => collapse.click()); await flush();
+    await flush();
+    expect(container.querySelector('[data-testid="social-panel"]')).toBeNull();
+    expect(document.activeElement).toBe(collapse);
   });
 });

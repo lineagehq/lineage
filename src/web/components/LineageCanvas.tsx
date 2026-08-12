@@ -91,7 +91,7 @@ export function LineageCanvas({
   onNewLineage: () => void;
   onClearFocus: () => void;
   onNodeActionMenu: (assetId: string, x: number, y: number) => void;
-  onNodeInspect: (assetId: string | null) => void;
+  onNodeInspect: (assetId: string | null) => boolean | void;
   onNodeOpenDetail: (assetId: string) => void;
   onNodeOpenHistory: (assetId: string) => void;
   onNodePosition: (node: AssetFlowNode) => void;
@@ -101,7 +101,7 @@ export function LineageCanvas({
   onSelectedAsset: (assetId: string) => void;
   onToggleBranch: (node: LineageNode) => Promise<void> | void;
   onToggleReroll: (node: LineageNode) => Promise<void> | void;
-  onToggleSocial: (node: LineageNode) => Promise<void> | void;
+  onToggleSocial: (node: LineageNode) => Promise<void> | boolean | void;
   onViewportInteraction: () => void;
   replayInteractive: boolean;
   selectionFull: boolean;
@@ -316,14 +316,14 @@ export function LineageCanvas({
             </button>
             <button
               aria-keyshortcuts="S"
-              aria-pressed={actionState.socialSelected}
+              aria-controls="lineage-canvas-panel"
               className={`social ${actionState.socialSelected ? 'selected' : ''}`}
               disabled={actionState.socialDisabled || Boolean(pendingAction)}
               onClick={() => void runQuickAction('social', previewNode)}
-              title={actionState.socialTitle}
+              title="Open Social composition (S)"
               type="button"
             >
-              <kbd>S</kbd><span>{actionState.socialSelected ? 'Social marked' : 'Social'}</span>
+              <kbd>S</kbd><span>{actionState.socialSelected ? 'Social composition' : 'Social'}</span>
             </button>
             <button aria-keyshortcuts="D" onClick={() => openDetail(previewNode.asset_id)} type="button"><kbd>D</kbd><span>Details</span></button>
           </div>
@@ -348,11 +348,11 @@ export function LineageCanvas({
         }}
         onEdgesChange={onEdgesChange}
         onKeyDownCapture={editFocusedEdge}
-        onNodeClick={(_event, node) => { onNodeActionMenu('', 0, 0); onNodeInspect(node.id); onSelectedAsset(node.id); }}
-        onNodeContextMenu={(event, node) => { event.preventDefault(); onNodeInspect(node.id); openNodeActionMenu(node.id, event.clientX, event.clientY); onSelectedAsset(node.id); }}
+        onNodeClick={(_event, node) => { if (onNodeInspect(node.id) === false) return; onNodeActionMenu('', 0, 0); onSelectedAsset(node.id); }}
+        onNodeContextMenu={(event, node) => { event.preventDefault(); if (onNodeInspect(node.id) === false) return; openNodeActionMenu(node.id, event.clientX, event.clientY); onSelectedAsset(node.id); }}
         onNodeDoubleClick={(_event, node) => {
           dismissPreview();
-          onNodeInspect(node.id);
+          if (onNodeInspect(node.id) === false) return;
           if ((node.data.attempt_count || 1) > 1) onNodeOpenHistory(node.id);
           else onNodeOpenDetail(node.id);
           onSelectedAsset(node.id);

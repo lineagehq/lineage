@@ -46,7 +46,8 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function LineageSocialPanel({ node, onClose, onDirtyChange, onMark, project, rootAssetId, transitionLocked = false }: {
+export function LineageSocialPanel({ isTransitionLocked, node, onClose, onDirtyChange, onMark, project, rootAssetId, transitionLocked = false }: {
+  isTransitionLocked?: () => boolean;
   node: LineageNode;
   onClose: () => void;
   onDirtyChange?: (dirty: boolean) => void;
@@ -68,6 +69,7 @@ export function LineageSocialPanel({ node, onClose, onDirtyChange, onMark, proje
   const [catalogReady, setCatalogReady] = useState(false);
   const [busyCount, setBusyCount] = useState(0);
   const [error, setError] = useState('');
+  const [interactionLockGeneration, setInteractionLockGeneration] = useState(0);
   const draftRef = useRef<Draft | null>(null);
   const itemRef = useRef<SocialWorkItem | null>(null);
   const selectedVariantIdRef = useRef<string | null>(null);
@@ -103,8 +105,21 @@ export function LineageSocialPanel({ node, onClose, onDirtyChange, onMark, proje
     else panel.removeAttribute('inert');
   }, [transitionLocked]);
   useEffect(() => { if (transitionLocked) setLoading(false); }, [transitionLocked]);
+  useEffect(() => {
+    if (!transitionLocked && !isTransitionLocked?.()) setInteractionLockGeneration(0);
+  }, [isTransitionLocked, transitionLocked]);
 
-  async function loadCatalog(protectDraft = false) {
+  function acceptEventTimeOwnership() {
+    if (transitionLocked || isTransitionLocked?.()) {
+      setInteractionLockGeneration(current => current + 1);
+      return false;
+    }
+    setInteractionLockGeneration(0);
+    return true;
+  }
+
+  async function loadCatalog(protectDraft = false, eventInitiated = false) {
+    if (eventInitiated && !acceptEventTimeOwnership()) return;
     if (protectDraft && dirty && !window.confirm('Refresh channel evidence while preserving this unsaved draft?')) return;
     const generation = ++requestGeneration.current.catalog;
     identityGeneration.current += 1;
@@ -128,6 +143,7 @@ export function LineageSocialPanel({ node, onClose, onDirtyChange, onMark, proje
   useEffect(() => { void loadCatalog(); }, [project]);
 
   function selectVariant(variant: SocialVariant) {
+    if (!acceptEventTimeOwnership()) return;
     if (dirty && !window.confirm('Discard unsaved Social changes?')) return;
     requestGeneration.current.validation += 1;
     identityGeneration.current += 1;
@@ -163,6 +179,7 @@ export function LineageSocialPanel({ node, onClose, onDirtyChange, onMark, proje
   }
 
   async function promote() {
+    if (!acceptEventTimeOwnership()) return;
     const generation = ++requestGeneration.current.item;
     const submittedIdentity = identityGeneration.current;
     const submittedCampaignKey = campaignKey;
@@ -179,12 +196,14 @@ export function LineageSocialPanel({ node, onClose, onDirtyChange, onMark, proje
   }
 
   function editCampaignKey(value: string) {
+    if (!acceptEventTimeOwnership()) return;
     requestGeneration.current.item += 1;
     setCampaignKey(value);
     setError('');
   }
 
   async function addVariant(channelId: string) {
+    if (!acceptEventTimeOwnership()) return;
     if (!item) return;
     if (dirty && !window.confirm('Discard unsaved Social changes and add this channel variant?')) return;
     const generation = ++requestGeneration.current.item;
@@ -204,6 +223,7 @@ export function LineageSocialPanel({ node, onClose, onDirtyChange, onMark, proje
   }
 
   async function save(deliberateConflictRetry = false) {
+    if (!acceptEventTimeOwnership()) return;
     if (!selectedVariant || !draft) return;
     if (conflictRevision !== null && !deliberateConflictRetry) return;
     const generation = ++requestGeneration.current.save;
@@ -250,6 +270,7 @@ export function LineageSocialPanel({ node, onClose, onDirtyChange, onMark, proje
   }
 
   async function runValidation() {
+    if (!acceptEventTimeOwnership()) return;
     if (!item) return;
     const generation = ++requestGeneration.current.validation;
     const identity = `${item.id}:${selectedVariantId}:${JSON.stringify(draft)}`;
@@ -265,6 +286,7 @@ export function LineageSocialPanel({ node, onClose, onDirtyChange, onMark, proje
   }
 
   async function refreshItem() {
+    if (!acceptEventTimeOwnership()) return;
     if (!item) return;
     if (dirty && !window.confirm('Discard unsaved changes and reload the latest Social revision?')) return;
     const generation = ++requestGeneration.current.item;
@@ -282,9 +304,15 @@ export function LineageSocialPanel({ node, onClose, onDirtyChange, onMark, proje
   }
 
   function requestClose() {
+    if (!acceptEventTimeOwnership()) return;
     onClose();
   }
+  async function markForSocial() {
+    if (!acceptEventTimeOwnership()) return;
+    await onMark();
+  }
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => {
+    if (!acceptEventTimeOwnership()) return;
     requestGeneration.current.validation += 1;
     identityGeneration.current += 1;
     setDraft(current => current ? { ...current, [key]: value } : current);
@@ -313,7 +341,7 @@ export function LineageSocialPanel({ node, onClose, onDirtyChange, onMark, proje
 
   return (
     <aside aria-busy={transitionLocked || undefined} aria-disabled={transitionLocked || undefined} aria-label="Social composition" className="lineage-side lineage-social-panel" id="lineage-canvas-panel">
-      {transitionLocked && <p aria-live="assertive" role="status">Social composition is locked while the approved transition completes.</p>}
+      {(transitionLocked || interactionLockGeneration > 0) && <p aria-live="assertive" role="status">Social composition is locked while the approved transition completes. Try the action again after it finishes.</p>}
       <div ref={panelRef}>
       <div className="lineage-side-head">
         <div><h3>Social composition</h3><p className="muted-copy">Prepare channel variants. Nothing here schedules or sends a post.</p></div>
@@ -324,13 +352,13 @@ export function LineageSocialPanel({ node, onClose, onDirtyChange, onMark, proje
         <div><dt>Checksum</dt><dd><code>{node.checksum_sha256 || 'Not available'}</code></dd></div>
       </dl>
       {loading && <p aria-live="polite" role="status">Loading Social connection and channels…</p>}
-      {error && <div className="lineage-social-alert error" role="alert"><strong>Social action needs attention</strong><p>{error}</p><div className="lineage-social-alert-actions">{item && <button disabled={saving} onClick={() => void refreshItem()} type="button">Reload work item</button>}<button onClick={() => void loadCatalog(true)} type="button">Refresh catalog</button></div></div>}
+      {error && <div className="lineage-social-alert error" role="alert"><strong>Social action needs attention</strong><p>{error}</p><div className="lineage-social-alert-actions">{item && <button disabled={saving} onClick={() => void refreshItem()} type="button">Reload work item</button>}<button onClick={() => void loadCatalog(true, true)} type="button">Refresh catalog</button></div></div>}
       {!loading && !connection && <div className="lineage-social-alert" role="status"><strong>Buffer is disconnected</strong><p>Connect this project in Settings before selecting channels.</p></div>}
       {!loading && connection && connection.health_state !== 'connected' && <div className="lineage-social-alert" role="status"><strong>Buffer connection needs attention</strong><p>{connection.health_state === 'credential_missing' ? 'The configured credential is unavailable.' : 'The organization does not match the verified connection.'}</p></div>}
       {!loading && connection && <p className="muted-copy">Organization {connection.organization_id} · {connection.channel_synced_at ? `Channels synced ${new Date(connection.channel_synced_at).toLocaleString()}` : 'Channels have not been synced'}</p>}
-      <button disabled={loading} onClick={() => void loadCatalog(true)} type="button">Refresh channel evidence</button>
+      <button disabled={loading} onClick={() => void loadCatalog(true, true)} type="button">Refresh channel evidence</button>
       {!node.social_mark?.active ? (
-        <div className="lineage-social-step"><h4>1. Mark this source</h4><p>Marking keeps the source on this canvas and makes it eligible for a work item.</p><button disabled={saving} onClick={() => void onMark()} type="button">Mark for Social</button></div>
+        <div className="lineage-social-step"><h4>1. Mark this source</h4><p>Marking keeps the source on this canvas and makes it eligible for a work item.</p><button disabled={saving} onClick={() => void markForSocial()} type="button">Mark for Social</button></div>
       ) : !item ? (
         <div className="lineage-social-step"><h4>1. Open a work item</h4><label>Campaign key<input maxLength={120} onChange={event => editCampaignKey(event.target.value)} value={campaignKey} /></label><button disabled={saving || !campaignKey.trim()} onClick={() => void promote()} type="button">Create or open work item</button></div>
       ) : (

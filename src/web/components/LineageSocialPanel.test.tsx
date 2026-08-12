@@ -21,6 +21,152 @@ async function flush() { await act(async () => { await new Promise(resolve => se
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (reason: unknown) => void; const promise = new Promise<T>((next, fail) => { resolve = next; reject = fail; }); return { promise, reject, resolve }; }
 
 describe('LineageSocialPanel', () => {
+  it('event-time gates campaign editing, variant selection, and every draft setter', async () => {
+    const secondChannel = { ...channel, channel_id: 'channel-2', display_name: 'Second channel' };
+    const secondVariant = { ...variant(), id: 'variant-2', channel_id: 'channel-2' };
+    let transitionOwned = false;
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path.includes('/connection?')) return Promise.resolve({ ok: true, connection: { project: 'demo', organization_id: 'org-1', health_state: 'connected', channel_synced_at: '2026-08-12T00:00:00Z', updated_at: '2026-08-12T00:00:00Z' } });
+      if (path.includes('/channels?')) return Promise.resolve({ ok: true, channels: [channel, secondChannel] });
+      if (path === '/api/social/items') return Promise.resolve({ schema_version: 'lineage.social_work_item.v1', item: item([persistedVariant(), secondVariant]) });
+      return Promise.reject(new Error(`Unexpected ${path}`));
+    });
+    container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+    act(() => root!.render(createElement(LineageSocialPanel, { node, onClose: vi.fn(), onMark: vi.fn(), project: 'demo', rootAssetId: 'root-1', isTransitionLocked: () => transitionOwned })));
+    await flush();
+    const campaign = [...container.querySelectorAll('label')].find(label => label.textContent?.includes('Campaign key'))!.querySelector('input')!;
+    transitionOwned = true;
+    act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(campaign, 'blocked-campaign'); campaign.dispatchEvent(new Event('change', { bubbles: true })); });
+    expect(campaign.value).toBe('default');
+    transitionOwned = false;
+    act(() => [...container!.querySelectorAll('button')].find(button => button.textContent === 'Create or open work item')!.click()); await flush();
+
+    const field = (label: string) => [...container!.querySelectorAll('label')].find(candidate => candidate.textContent?.includes(label))!.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('input,textarea,select')!;
+    const change = (control: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, value: string, checked?: boolean) => act(() => {
+      if (checked !== undefined) Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'checked')!.set!.call(control, checked);
+      else Object.getOwnPropertyDescriptor(control instanceof HTMLSelectElement ? HTMLSelectElement.prototype : control instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(control, value);
+      control.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const caption = field('Caption');
+    const hashtags = field('Ordered hashtags');
+    const placement = field('Hashtag placement');
+    const altText = field('Alt text');
+    const reviewed = field('Human-reviewed alt text');
+    const reviewer = field('Reviewer');
+    const editorial = field('Editorial state');
+    const notification = [...container.querySelectorAll<HTMLInputElement>('input[type="radio"]')].find(input => input.parentElement?.textContent?.includes('Notification'))!;
+    const timing = field('Composition timing intent');
+    const customTime = field('Exact zoned time');
+    const second = [...container.querySelectorAll('button')].find(button => button.textContent?.startsWith('Second channel ·'))!;
+    transitionOwned = true;
+    change(caption, 'blocked caption');
+    change(hashtags, 'blocked-hashtag');
+    change(placement, 'caption');
+    change(altText, 'blocked alt');
+    change(reviewed, '', false);
+    change(reviewer, 'Blocked reviewer');
+    change(editorial, 'ready');
+    change(notification, '', true);
+    change(timing, 'addToQueue');
+    change(customTime, '2027-01-01T00:00:00Z');
+    act(() => second.click());
+    expect(caption.value).toBe('Persisted caption');
+    expect(hashtags.value).toBe('first\nsecond');
+    expect(placement.value).toBe('first_comment');
+    expect(altText.value).toBe('Reviewed description');
+    expect((reviewed as HTMLInputElement).checked).toBe(true);
+    expect(reviewer.value).toBe('Editor');
+    expect(editorial.value).toBe('needs_review');
+    expect(notification.checked).toBe(true);
+    expect(timing.value).toBe('customScheduled');
+    expect(customTime.value).toBe('2026-08-15T09:30:00-07:00');
+    expect(container.querySelector('[aria-current="true"]')?.textContent).toContain('Studio Instagram');
+    expect(container.textContent).toContain('locked while the approved transition completes');
+  });
+
+  it('event-time gates Mark before invoking the parent mutation and never replays it', async () => {
+    const onMark = vi.fn().mockResolvedValue(undefined);
+    let transitionOwned = true;
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path.includes('/connection?')) return Promise.resolve({ ok: true, connection: null });
+      if (path.includes('/channels?')) return Promise.resolve({ ok: true, channels: [] });
+      return Promise.reject(new Error(`Unexpected ${path}`));
+    });
+    container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+    act(() => root!.render(createElement(LineageSocialPanel, { node: { ...node, social_mark: undefined }, onClose: vi.fn(), onMark, project: 'demo', rootAssetId: 'root-1', isTransitionLocked: () => transitionOwned })));
+    await flush();
+    const mark = [...container.querySelectorAll('button')].find(button => button.textContent === 'Mark for Social')!;
+    act(() => mark.click());
+    expect(onMark).not.toHaveBeenCalled();
+    transitionOwned = false;
+    await flush();
+    expect(onMark).not.toHaveBeenCalled();
+    act(() => mark.click());
+    expect(onMark).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects Create/Open at event time during the parent render gap, then accepts it once ownership settles', async () => {
+    const promoted = deferred<{ schema_version: 'lineage.social_work_item.v1'; item: SocialWorkItem }>();
+    let transitionOwned = false;
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path.includes('/connection?')) return Promise.resolve({ ok: true, connection: { project: 'demo', organization_id: 'org-1', health_state: 'connected', channel_synced_at: '2026-08-12T00:00:00Z', updated_at: '2026-08-12T00:00:00Z' } });
+      if (path.includes('/channels?')) return Promise.resolve({ ok: true, channels: [channel] });
+      if (path === '/api/social/items') return promoted.promise;
+      return Promise.reject(new Error(`Unexpected ${path}`));
+    });
+    container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+    act(() => root!.render(createElement(LineageSocialPanel, { node, onClose: vi.fn(), onMark: vi.fn(), project: 'demo', rootAssetId: 'root-1', isTransitionLocked: () => transitionOwned })));
+    await flush();
+    const create = [...container.querySelectorAll('button')].find(button => button.textContent === 'Create or open work item')!;
+    transitionOwned = true;
+    act(() => create.click());
+    expect(vi.mocked(api).mock.calls.filter(([path]) => path === '/api/social/items')).toHaveLength(0);
+    expect(container.textContent).toContain('locked while the approved transition completes');
+    transitionOwned = false;
+    expect(vi.mocked(api).mock.calls.filter(([path]) => path === '/api/social/items')).toHaveLength(0);
+    act(() => create.click());
+    expect(vi.mocked(api).mock.calls.filter(([path]) => path === '/api/social/items')).toHaveLength(1);
+    await act(async () => promoted.resolve({ schema_version: 'lineage.social_work_item.v1', item: item([variant()]) }));
+    expect(container.textContent).toContain('Work item item-1');
+  });
+
+  it.each(['Add variant', 'Save composition revision', 'Validate composition', 'Reload work item', 'Refresh catalog', 'Refresh channel evidence', 'Close Social composition'])('event-time gates %s before side effects', async action => {
+    const secondChannel = { ...channel, channel_id: 'channel-2', display_name: 'Second channel' };
+    let transitionOwned = false;
+    let preparingReload = false;
+    const onClose = vi.fn();
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path.includes('/connection?')) return Promise.resolve({ ok: true, connection: { project: 'demo', organization_id: 'org-1', health_state: 'connected', channel_synced_at: '2026-08-12T00:00:00Z', updated_at: '2026-08-12T00:00:00Z' } });
+      if (path.includes('/channels?')) return Promise.resolve({ ok: true, channels: [channel, secondChannel] });
+      if (path === '/api/social/items') return Promise.resolve({ schema_version: 'lineage.social_work_item.v1', item: item([variant(1, 'Original')]) });
+      if (path.endsWith('/preflight') && preparingReload) return Promise.reject(new Error('Expose reload action'));
+      return new Promise(() => undefined);
+    });
+    container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+    act(() => root!.render(createElement(LineageSocialPanel, { node, onClose, onMark: vi.fn(), project: 'demo', rootAssetId: 'root-1', isTransitionLocked: () => transitionOwned })));
+    await flush();
+    act(() => [...container!.querySelectorAll('button')].find(button => button.textContent === 'Create or open work item')!.click()); await flush();
+    if (action === 'Save composition revision') {
+      const caption = container.querySelector('textarea')!;
+      act(() => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(caption, 'Changed'); caption.dispatchEvent(new Event('change', { bubbles: true })); });
+    }
+    if (action === 'Reload work item' || action === 'Refresh catalog') {
+      preparingReload = true;
+      act(() => [...container!.querySelectorAll('button')].find(button => button.textContent === 'Validate composition')!.click()); await flush();
+      preparingReload = false;
+    }
+    const selector = action === 'Close Social composition'
+      ? container.querySelector<HTMLButtonElement>('[aria-label="Close Social composition"]')
+      : [...container.querySelectorAll('button')].find(button => button.textContent === action);
+    expect(selector).toBeTruthy();
+    const callsBefore = vi.mocked(api).mock.calls.length;
+    transitionOwned = true;
+    act(() => selector!.click());
+    expect(vi.mocked(api).mock.calls).toHaveLength(callsBefore);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('locked while the approved transition completes');
+  });
+
   it('freezes editing and invalidates pending panel work while a transition transaction is locked', async () => {
     const promoted = deferred<{ schema_version: 'lineage.social_work_item.v1'; item: SocialWorkItem }>();
     vi.mocked(api).mockImplementation((path: string) => {

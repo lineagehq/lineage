@@ -210,6 +210,7 @@ export function LineageView({ asset, onAssetsChanged, onSocialDirtyChange, onSoc
     return true;
   }, []);
   const isSocialTransitionOwner = useCallback((token: number) => activeTransitionTokenRef.current === token, []);
+  const isSocialTransitionPending = useCallback(() => socialTransitionPendingRef.current, []);
   useEffect(() => onSocialDirtyChange?.(panelMode === 'social' && socialDirty), [onSocialDirtyChange, panelMode, socialDirty]);
   useEffect(() => () => onSocialDirtyChange?.(false), [onSocialDirtyChange]);
   useEffect(() => onSocialTransitionPendingChange?.(socialTransitionPending), [onSocialTransitionPendingChange, socialTransitionPending]);
@@ -1233,6 +1234,7 @@ export function LineageView({ asset, onAssetsChanged, onSocialDirtyChange, onSoc
         )}
         {panelMode === 'social' && snapshot && activeNode && (
           <LineageSocialPanel
+            isTransitionLocked={isSocialTransitionPending}
             key={`${snapshot.root_asset_id}:${activeNode.asset_id}`}
             node={activeNode}
             onClose={closePanel}

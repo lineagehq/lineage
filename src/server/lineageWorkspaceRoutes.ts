@@ -1,5 +1,7 @@
 import type express from 'express';
+import { defaultProject, projectCatalogDefinitionExists } from './assetCore';
 import {
+  ensureWorkspaceRootAsset,
   indexLineageAssets,
 } from './assetLineage';
 import {
@@ -20,6 +22,7 @@ import {
   seedSwissifierRichDemoWorkspace,
   swissifierRichDemoMediaStatus,
 } from './assetLineageDemo';
+import { swissifierDemoProject } from './projectWorkspaces';
 
 type ProjectFrom = (input: { body?: Record<string, unknown>; query?: Record<string, unknown> }) => string;
 type AsyncRoute = (handler: (req: express.Request, res: express.Response) => Promise<void> | void) => express.RequestHandler;
@@ -31,14 +34,21 @@ export function registerLineageWorkspaceRoutes(app: express.Express, projectFrom
 
   app.post('/api/lineage-workspaces', asyncRoute((req, res) => {
     const project = projectFrom(req);
-    if (req.body.confirmWrite === true) indexLineageAssets(project);
+    let rootAssetId = String(req.body.rootAssetId || '');
+    if (req.body.confirmWrite === true) {
+      if (project === defaultProject || projectCatalogDefinitionExists(project)) {
+        indexLineageAssets(project);
+      }
+      rootAssetId = ensureWorkspaceRootAsset(project, rootAssetId);
+    }
     res.json(createLineageWorkspace(project, {
-      rootAssetId: String(req.body.rootAssetId || ''),
+      rootAssetId,
       title: typeof req.body.title === 'string' ? req.body.title : undefined,
       status: req.body.status === 'paused' || req.body.status === 'archived' ? req.body.status : 'active',
       notes: typeof req.body.notes === 'string' ? req.body.notes : undefined,
       createdBy: req.body.createdBy === 'agent' || req.body.createdBy === 'system' ? req.body.createdBy : 'human',
       activate: req.body.activate !== false,
+      restoreDeleted: req.body.restoreDeleted === true,
       confirmWrite: req.body.confirmWrite === true,
     }));
   }));
@@ -55,7 +65,7 @@ export function registerLineageWorkspaceRoutes(app: express.Express, projectFrom
   }));
 
   app.post('/api/lineage-workspaces/demo/swissifier/seed', asyncRoute((req, res) => {
-    res.json(seedSwissifierRichDemoWorkspace(projectFrom(req), {
+    res.json(seedSwissifierRichDemoWorkspace(swissifierDemoProject, {
       activate: req.body.activate !== false,
       confirmWrite: req.body.confirmWrite === true,
     }));
@@ -66,7 +76,7 @@ export function registerLineageWorkspaceRoutes(app: express.Express, projectFrom
   }));
 
   app.get('/api/lineage-workspaces/demo/swissifier/media', asyncRoute((req, res) => {
-    res.json({ ok: true, status: swissifierRichDemoMediaStatus(projectFrom(req)) });
+    res.json({ ok: true, status: swissifierRichDemoMediaStatus(swissifierDemoProject) });
   }));
 
   app.post('/api/lineage-workspaces/demo/media/restore', asyncRoute((req, res) => {
@@ -76,7 +86,7 @@ export function registerLineageWorkspaceRoutes(app: express.Express, projectFrom
   app.post('/api/lineage-workspaces/demo/swissifier/media/restore', asyncRoute((req, res) => {
     res.json({
       ok: true,
-      result: restoreSwissifierRichDemoMedia(projectFrom(req), {
+      result: restoreSwissifierRichDemoMedia(swissifierDemoProject, {
         confirmWrite: req.body.confirmWrite === true,
         sourceDir: typeof req.body.sourceDir === 'string' ? req.body.sourceDir : undefined,
       }),
@@ -86,7 +96,7 @@ export function registerLineageWorkspaceRoutes(app: express.Express, projectFrom
   app.post('/api/lineage-workspaces/demo/swissifier/media/download', asyncRoute(async (req, res) => {
     res.json({
       ok: true,
-      result: await downloadSwissifierRichDemoMedia(projectFrom(req), {
+      result: await downloadSwissifierRichDemoMedia(swissifierDemoProject, {
         confirmWrite: req.body.confirmWrite === true,
       }),
     });
@@ -106,6 +116,7 @@ export function registerLineageWorkspaceRoutes(app: express.Express, projectFrom
       status: req.body.status === 'active' || req.body.status === 'paused' || req.body.status === 'archived' ? req.body.status : undefined,
       notes: typeof req.body.notes === 'string' ? req.body.notes : undefined,
       activate: req.body.activate === true,
+      maxQueuedBranches: typeof req.body.maxQueuedBranches === 'number' ? req.body.maxQueuedBranches : undefined,
       confirmWrite: req.body.confirmWrite === true,
     }));
   }));

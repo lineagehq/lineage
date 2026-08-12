@@ -6,6 +6,36 @@
   transition: border-color 160ms ease, box-shadow 160ms ease, opacity 160ms ease, transform 160ms ease;
 }
 
+.lineage-canvas.variation-queue-active .lineage-node:not(.variation-queued):not(.variation-primary):not(.variation-ancestor) {
+  opacity: 0.3;
+}
+
+.lineage-canvas.variation-queue-active .lineage-node.variation-ancestor {
+  opacity: 0.66;
+}
+
+.lineage-node.variation-queued {
+  border-color: #0b8791;
+  box-shadow: 0 0 0 4px rgba(11, 135, 145, 0.14), 0 12px 28px rgba(19, 59, 68, 0.12);
+}
+
+.lineage-node.variation-primary {
+  z-index: 2;
+  border-color: #057986;
+  box-shadow: 0 0 0 6px rgba(7, 145, 157, 0.22), 0 16px 34px rgba(19, 59, 68, 0.2);
+  transform: translateY(-2px);
+}
+
+.lineage-canvas.variation-queue-active .react-flow__edge:not(.lineage-edge-variation-related) .react-flow__edge-path,
+.lineage-canvas.variation-queue-active .react-flow__edge:not(.lineage-edge-variation-related) .react-flow__edge-textwrapper {
+  opacity: 0.18;
+}
+
+.lineage-canvas.variation-queue-active .react-flow__edge.lineage-edge-variation-related .react-flow__edge-path {
+  opacity: 0.78;
+  stroke: #6baab0;
+}
+
 .lineage-canvas.focus-active .lineage-node.focus-none {
   opacity: 0.48;
 }

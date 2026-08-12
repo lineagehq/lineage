@@ -2,7 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { archiveAsset, cleanupUploadedTemp, defaultProduct, deleteObjectGuarded, ensureUploadDir, isLineageAssetError, listAssets, listProjects, localPreviewPath, packageRoot, presignAsset, pullAsset, promoteAsset, uploadAsset, updatePlacement } from './server/assetCore';
+import { archiveAsset, cleanupUploadedTemp, defaultProduct, deleteObjectGuarded, ensureUploadDir, isLineageAssetError, listAssets, localPreviewPath, packageRoot, presignAsset, pullAsset, promoteAsset, uploadAsset, updatePlacement } from './server/assetCore';
 import { isAssetLookupError, lookupAssets } from './server/assetLookup';
 import {
   clearLineageRerollRequest,
@@ -24,9 +24,11 @@ import {
 import { getLineageBrief, linkSelectedLineageChild } from './server/assetLineageHandoff';
 import { removeLineageNode } from './server/assetLineageRemove';
 import { registerSocialMarkRoutes } from './server/social/socialRoutes';
+import { registerAssetDiscussionMarkRoutes } from './server/assetDiscussionMarks';
 import { isLineageTaskError } from './server/assetLineageTasks';
-import { isLineageWorkspaceError } from './server/assetLineageWorkspaces';
-import { lineageDb } from './server/assetLineageDb';
+import { isLineageWorkspaceError, migrateLegacyLineageWorkspaces } from './server/assetLineageWorkspaces';
+import { ensureSwissifierRichDemoWorkspace } from './server/assetLineageDemo';
+import { isLifecycleWriteGuardError, lineageDb } from './server/assetLineageDb';
 import { getLedgerPageFromQuery } from './server/assetLedgerApi';
 import { isAssetReviewError, markAssetReview, markAssetReviewsFromRequestBody, requireApprovedLocalBackupPath, withLocalReviewMetadata } from './server/assetReviews';
 import { getReviewQueue } from './server/assetReviewQueue';
@@ -47,6 +49,8 @@ import { isGenerationReceiptError } from './server/generationReceipts';
 import { registerGenerationTargetRoutes } from './server/generationTargetRoutes';
 import { registerLineageTaskRoutes } from './server/lineageTaskRoutes';
 import { registerLineageWorkspaceRoutes } from './server/lineageWorkspaceRoutes';
+import { projectLifecycleGate, registerProjectWorkspaceRoutes } from './server/projectWorkspaceRoutes';
+import { isProjectWorkspaceError, reconcileProjectWorkspaceState } from './server/projectWorkspaces';
 import { assertLineageCodeOrigin, getLineageRuntimeInfo, normalizeRuntimeChannel } from './server/runtimeInfo';
 import { assertResolvedRuntimeProfileEnvironment, assertRuntimeProfileSafety, assertUnselectedDatabaseIsUnbound, doctorLineageProfile } from './server/lineageProfiles';
 import { isManagedWriterRoutingError, registerManagedWriterRoute } from './server/managedWriterRouting';
@@ -90,6 +94,8 @@ if (writerLease) {
   try {
     const startupDatabase = lineageDb();
     startupDatabase.close();
+    for (const project of reconcileProjectWorkspaceState()) migrateLegacyLineageWorkspaces(project);
+    ensureSwissifierRichDemoWorkspace();
   } catch (error) {
     writerLease.release();
     throw error;
@@ -129,10 +135,11 @@ function projectFrom(input: { body?: Record<string, unknown>; query?: Record<str
 function asyncRoute(handler: (req: express.Request, res: express.Response) => Promise<void> | void): express.RequestHandler {
   return (req, res, next) => { Promise.resolve(handler(req, res)).catch(next); };
 }
-app.get('/api/projects', asyncRoute((_req, res) => { res.json({ projects: listProjects() }); }));
+registerProjectWorkspaceRoutes(app, asyncRoute);
 app.get('/api/runtime', asyncRoute((_req, res) => {
   res.json({ ok: true, runtime: getLineageRuntimeInfo({ channel: runtimeChannel, code: startupCode }) });
 }));
+app.use('/api', projectLifecycleGate(projectFrom));
 app.get(
   '/api/assets',
   asyncRoute((req, res) => {
@@ -216,6 +223,7 @@ app.get(
 registerLineageWorkspaceRoutes(app, projectFrom, asyncRoute);
 registerLineageTaskRoutes(app, projectFrom, asyncRoute);
 registerSocialMarkRoutes(app, projectFrom, asyncRoute);
+registerAssetDiscussionMarkRoutes(app, projectFrom, asyncRoute);
 
 app.get('/api/lineage/:rootAssetId/rerolls', asyncRoute((req, res) => {
   res.json(listLineageRerollRequests(projectFrom(req), req.params.rootAssetId));
@@ -547,6 +555,17 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
   }
   if (isLineageWorkspaceError(error)) {
     res.status(error.status).json({ error: error.message });
+    return;
+  }
+  if (isProjectWorkspaceError(error)) {
+    res.status(error.status).json({ error: error.code, message: error.message });
+    return;
+  }
+  if (isLifecycleWriteGuardError(error)) {
+    const message = error instanceof Error && error.message.includes('lineage_workspace_deleted')
+      ? 'This workspace was permanently deleted; restore it before writing new workspace state.'
+      : 'This project was permanently deleted; create or restore it before writing new project state.';
+    res.status(409).json({ error: 'lifecycle_write_rejected', message });
     return;
   }
   if (isLineageTaskError(error)) {

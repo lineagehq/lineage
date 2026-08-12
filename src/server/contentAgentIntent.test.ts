@@ -10,6 +10,7 @@ import { indexLineageAssets, linkLineageAssets, updateSelectedAsset } from './as
 import { createLineageWorkspace } from './assetLineageWorkspaces';
 import { resolveContentAgentHandoff } from './contentAgentIntent';
 import { markAssetSocial } from './assetSocialMarks';
+import { markAssetDiscussion } from './assetDiscussionMarks';
 import { setContentTarget } from './contentTargets';
 
 const scratchDir = join(repoRoot, '.asset-scratch', 'vitest-content-agent-intent');
@@ -56,7 +57,7 @@ function seedQueue() {
   setContentTarget(defaultProject, { confirmWrite: true, notes: 'Human selected this one.', postId: 'selected-ready-post' });
 }
 
-function seedLineageWorkspace() {
+function seedLineageWorkspace(prompt?: string) {
   const root = join(scratchDir, 'demo-lineage-intent-root.png');
   const child = join(scratchDir, 'demo-lineage-intent-child.png');
   mkdirSync(scratchDir, { recursive: true });
@@ -66,7 +67,7 @@ function seedLineageWorkspace() {
   const childId = `local-${fileSha256(child).slice(0, 12)}`;
   indexLineageAssets(defaultProject);
   linkLineageAssets(defaultProject, { childAssetId: childId, confirmWrite: true, parentAssetId: rootId });
-  updateSelectedAsset(defaultProject, { assetId: childId, confirmWrite: true, rootAssetId: rootId });
+  updateSelectedAsset(defaultProject, { assetId: childId, confirmWrite: true, notes: prompt, rootAssetId: rootId });
   const workspace = createLineageWorkspace(defaultProject, {
     activate: true,
     confirmWrite: true,
@@ -125,14 +126,16 @@ describe('content agent natural-language intent resolver', () => {
     expect(handoff).toMatchObject({
       intent: { resolved: 'lineage.workspace.active', selection_mode: 'lineage_workspace' },
       natural_language: { matched_intent: 'lineage.workspace.active' },
+      guardrails: { safe_to_start: false },
       next_action: { kind: 'continue_lineage_workspace' },
-      status: 'ok',
+      status: 'needs_clarification',
       target: {
         id: workspace.id,
         next_asset_id: childId,
         type: 'lineage_workspace',
       },
     });
+    expect(handoff.messages[0]?.text).toContain('without a prompt');
   });
 
   it('resolves current social marks as a read-only canvas asset selection', () => {
@@ -175,8 +178,51 @@ describe('content agent natural-language intent resolver', () => {
     expect(commands && 'list' in commands ? commands.list : undefined).toContain(`--profile '${process.env.LINEAGE_PROFILE_MANIFEST}' --json`);
   });
 
+  it('resolves the whole Discussion set with notes and an empty write scope', () => {
+    const { childId, rootId } = seedLineageWorkspace();
+    markAssetDiscussion(defaultProject, {
+      asset: rootId, confirmWrite: true, markedBy: 'human:owner', notes: 'Is the hierarchy clear?', rootAssetId: rootId,
+    });
+    markAssetDiscussion(defaultProject, {
+      asset: childId, confirmWrite: true, markedBy: 'human:owner', rootAssetId: rootId,
+    });
+
+    const handoff = resolveContentAgentHandoff('Can we discuss these nodes in the Discussion set for Demo?');
+
+    expect(handoff).toMatchObject({
+      context: {
+        related_assets: expect.arrayContaining([rootId, childId]),
+        selected_assets: expect.arrayContaining([rootId, childId]),
+        notes: expect.arrayContaining([expect.stringContaining('note=Is the hierarchy clear?')]),
+      },
+      guardrails: {
+        do_not_modify: expect.arrayContaining([expect.stringContaining('branches, re-roll requests, agent claims, or tasks')]),
+        requires_confirmation: true,
+        safe_to_start: true,
+        write_scope: [],
+      },
+      intent: { resolved: 'asset.selection.current', selection_mode: 'asset_selection' },
+      next_action: {
+        canonical_call: { args: { project: defaultProject, root: rootId }, command: 'discuss list', tool: 'lineage_cli' },
+        commands: { list: expect.stringContaining(`discuss list --project '${defaultProject}' --root '${rootId}'`) },
+      },
+      status: 'ok',
+      target: null,
+    });
+    expect(handoff.messages[0]?.text).toContain('not permission to branch, re-roll, claim, or execute tasks');
+  });
+
+  it('does not route an ordinary request to discuss selected assets through the saved Discussion set', () => {
+    selectCurrentAssets(defaultProject, { assetIds: ['selected-image-a'], confirmWrite: true });
+
+    const handoff = resolveContentAgentHandoff('Can we discuss these selected assets for Demo?');
+
+    expect(handoff.context.selected_assets).toEqual(['selected-image-a']);
+    expect(handoff.next_action?.canonical_call?.command).not.toBe('discuss list');
+  });
+
   it('prefers a ready active lineage workspace for generic selections prompts', () => {
-    const { childId, workspace } = seedLineageWorkspace();
+    const { childId, workspace } = seedLineageWorkspace('Create a more editorial variation.');
     createReviewSet(defaultProject, {
       assetIds: ['variation-a', 'variation-b'],
       confirmWrite: true,
@@ -198,6 +244,27 @@ describe('content agent natural-language intent resolver', () => {
         type: 'lineage_workspace',
       },
     });
+  });
+
+  it('keeps an active promptless lineage queue ahead of generic asset selections', () => {
+    const { childId, workspace } = seedLineageWorkspace();
+
+    const handoff = resolveContentAgentHandoff('Let us keep working on my selections for Demo');
+
+    expect(handoff).toMatchObject({
+      context: { selected_assets: [childId] },
+      guardrails: { safe_to_start: false },
+      intent: { resolved: 'lineage.workspace.active', selection_mode: 'lineage_workspace' },
+      natural_language: { matched_intent: 'lineage.workspace.active' },
+      next_action: { kind: 'continue_lineage_workspace' },
+      status: 'needs_clarification',
+      target: {
+        id: workspace.id,
+        next_asset_id: childId,
+        type: 'lineage_workspace',
+      },
+    });
+    expect(handoff.messages[0]?.text).toContain('without a prompt');
   });
 
   it('resolves variation choices to selected assets through the active review set', () => {

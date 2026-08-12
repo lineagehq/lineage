@@ -46,7 +46,10 @@ async function waitForProjects(url) {
       const response = await fetch(url);
       if (response.ok) {
         const body = await response.json();
-        if (Array.isArray(body.projects) && body.projects.some(item => item.project === project)) return;
+        // Keep the release smoke compatible with the currently published package
+        // (`project`) and the project-workspace API introduced by this checkout
+        // (`id`). The smoke intentionally installs npm latest by default.
+        if (Array.isArray(body.projects) && body.projects.some(item => (item.id || item.project) === project)) return;
       }
     } catch (error) {
       lastError = error;

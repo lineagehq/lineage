@@ -8,7 +8,7 @@ import { attachContentPostAsset, createContentBatch, createContentPost, updateCo
 import { createReviewSet, selectCurrentAssets } from './assetSelections';
 import { getAssetSelectionAgentHandoff, getContentQueueNextAgentHandoff, getContentTargetAgentHandoff, getLineageWorkspaceAgentHandoff } from './contentAgentHandoff';
 import { indexLineageAssets, linkLineageAssets, updateSelectedAsset } from './assetLineage';
-import { createLineageWorkspace } from './assetLineageWorkspaces';
+import { createLineageWorkspace, updateLineageWorkspace } from './assetLineageWorkspaces';
 import { setContentTarget } from './contentTargets';
 
 const scratchDir = join(repoRoot, '.asset-scratch', 'vitest-content-agent-handoff');
@@ -283,5 +283,44 @@ describe('content agent handoff', () => {
     expect(commands.lineageBriefCommand).toContain(`--root ${shellQuote(rootId)}`);
     expect(commands.linkChildCommand).toContain('--summary "<one-or-two-words>"');
     expect(handoff.next_action?.instructions).toContain('one- or two-word edge summary');
+  });
+
+  it('requires clarification before an agent starts a promptless queued branch', () => {
+    const { childId, rootId } = seedLineageWorkspace();
+    updateSelectedAsset(defaultProject, {
+      assetId: childId,
+      confirmWrite: true,
+      mode: 'add',
+      notes: '',
+      rootAssetId: rootId,
+    });
+
+    const handoff = getLineageWorkspaceAgentHandoff(defaultProject);
+
+    expect(handoff.status).toBe('needs_clarification');
+    expect(handoff.guardrails).toMatchObject({
+      requires_confirmation: true,
+      safe_to_start: false,
+      write_scope: [],
+    });
+    expect(handoff.context.notes).toContain(`No variation prompt was provided for ${childId}. Ask the user what they want changed before generating.`);
+    expect(handoff.messages[0]?.text).toContain('without a prompt');
+    expect(handoff.next_action?.instructions).toContain(`ask the human what they want changed for ${childId}`);
+  });
+
+  it('uses the workspace branch limit in agent selection guidance', () => {
+    const { rootId, workspace } = seedLineageWorkspace();
+    const sibling = join(scratchDir, 'demo-lineage-agent-sibling.png');
+    writeFileSync(sibling, Buffer.from('lineage-agent-sibling'));
+    const siblingId = `local-${fileSha256(sibling).slice(0, 12)}`;
+    indexLineageAssets(defaultProject);
+    linkLineageAssets(defaultProject, { childAssetId: siblingId, confirmWrite: true, parentAssetId: rootId });
+    updateSelectedAsset(defaultProject, { clear: true, confirmWrite: true, rootAssetId: rootId });
+    updateLineageWorkspace(defaultProject, workspace.id, { confirmWrite: true, maxQueuedBranches: 2 });
+
+    const handoff = getLineageWorkspaceAgentHandoff(defaultProject);
+
+    expect(handoff.status).toBe('needs_clarification');
+    expect(handoff.messages[0]?.text).toContain('needs up to 2 next variation bases');
   });
 });

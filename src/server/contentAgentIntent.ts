@@ -1,6 +1,7 @@
 import { defaultProject, listProjects } from './assetCore';
 import { chooseReviewSetLabels, labelsFromPrompt } from './assetSelections';
 import { listAssetSocialMarks } from './assetSocialMarks';
+import { listAssetDiscussionMarks } from './assetDiscussionMarks';
 import { listLineageWorkspaces } from './assetLineageWorkspaces';
 import { getAssetSelectionAgentHandoff, getContentQueueNextAgentHandoff, getContentTargetAgentHandoff, getLineageWorkspaceAgentHandoff } from './contentAgentHandoff';
 import { lineageCliCommand, shellQuote } from './lineageRuntimeCommand';
@@ -30,6 +31,13 @@ const socialMarkTerms = [
   'social marked',
   'social marks',
   'social candidates',
+];
+const discussionMarkTerms = [
+  'marked for discussion',
+  'discussion set',
+  'discussion flags',
+  'flagged for discussion',
+  'nodes to discuss',
 ];
 const lineageWorkspaceTerms = [
   'active lineage',
@@ -202,6 +210,58 @@ function socialMarksHandoff(project: string, prompt: string, alias: string | nul
   };
 }
 
+function discussionMarksHandoff(project: string, prompt: string, alias: string | null, matched: string[]): ContentAgentResolvedHandoff {
+  const workspace = listLineageWorkspaces(project).active_workspace;
+  if (!workspace) {
+    return unresolved(
+      project,
+      prompt,
+      { matched_intent: 'asset.selection.current', matched_terms: matched, project_alias: alias },
+      'needs_clarification',
+      'question',
+      'No active lineage canvas is available. Name the canvas root before asking about the Discussion set.',
+    );
+  }
+  const listed = listAssetDiscussionMarks(project, workspace.root_asset_id);
+  const listCommand = lineageCliCommand(`discuss list --project ${shellQuote(project)} --root ${shellQuote(workspace.root_asset_id)}`);
+  return {
+    context: {
+      notes: listed.marks.flatMap(mark => [
+        `${mark.asset_id} (${mark.title})${mark.notes ? ` note=${mark.notes}` : ''} local=${mark.local.absolute_path || 'unavailable'} checksum=${mark.checksum_sha256 || 'unavailable'}`,
+        ...mark.warnings,
+      ]),
+      related_assets: listed.marks.map(mark => mark.asset_id),
+      selected_assets: listed.marks.map(mark => mark.asset_id),
+      selected_target: null,
+    },
+    guardrails: {
+      do_not_modify: [
+        ...defaultDoNotModify,
+        'lineage branches, re-roll requests, agent claims, or tasks based only on Discussion membership',
+      ],
+      requires_confirmation: true,
+      safe_to_start: true,
+      write_scope: [],
+    },
+    intent: { project, resolved: 'asset.selection.current', selection_mode: 'asset_selection' },
+    messages: [{
+      level: 'info',
+      text: `${listed.marks.length} asset(s) are in the Discussion set for ${workspace.title}. Discussion membership is read-only conversational context, not permission to branch, re-roll, claim, or execute tasks.`,
+    }],
+    natural_language: {
+      matched_intent: 'asset.selection.current', matched_terms: matched,
+      normalized_prompt: normalizePrompt(prompt), project_alias: alias, prompt,
+    },
+    next_action: {
+      canonical_call: { args: { project, root: workspace.root_asset_id }, command: 'discuss list', tool: 'lineage_cli' },
+      commands: { list: listCommand },
+      instructions: 'Use every listed asset and optional note to answer the user’s general discussion question. Do not branch, re-roll, claim, create tasks, or generate work without a separate explicit request.',
+      kind: 'continue_asset_selection', label: 'Discuss marked assets', lane: null,
+    },
+    schema_version: 'lineage.agent_handoff.v1', status: 'ok', target: null,
+  };
+}
+
 export function resolveContentAgentHandoff(prompt: string, fallbackProject = defaultProject): ContentAgentResolvedHandoff {
   const normalized = normalizePrompt(prompt);
   const { alias, project } = resolveProject(prompt, fallbackProject);
@@ -227,6 +287,9 @@ export function resolveContentAgentHandoff(prompt: string, fallbackProject = def
     });
   }
 
+  const discussionMarks = matchedTerms(normalized, discussionMarkTerms);
+  if (discussionMarks.length > 0) return discussionMarksHandoff(project, prompt, alias, discussionMarks);
+
   const socialMarks = matchedTerms(normalized, socialMarkTerms);
   if (socialMarks.length > 0) return socialMarksHandoff(project, prompt, alias, socialMarks);
 
@@ -244,7 +307,10 @@ export function resolveContentAgentHandoff(prompt: string, fallbackProject = def
   const assetSelection = matchedTerms(normalized, assetSelectionTerms);
   if (assetSelection.length > 0) {
     const lineageHandoff = getLineageWorkspaceAgentHandoff(project);
-    if (lineageHandoff.status === 'ok' && lineageHandoff.guardrails.safe_to_start) {
+    const activeLineageQueue = lineageHandoff.target?.type === 'lineage_workspace'
+      && lineageHandoff.target.status === 'active'
+      && Boolean(lineageHandoff.target.next_asset_ids?.length);
+    if ((lineageHandoff.status === 'ok' && lineageHandoff.guardrails.safe_to_start) || activeLineageQueue) {
       return withNatural(lineageHandoff, {
         matched_intent: 'lineage.workspace.active',
         matched_terms: assetSelection,

@@ -231,7 +231,12 @@ export function getLineageWorkspaceAgentHandoff(project: string): ContentAgentHa
   const nextAssets = next.next_assets;
   const quotedProject = shellQuote(project);
   const quotedWorkspace = shellQuote(workspace.id);
-  const safeToStart = workspace.status === 'active' && nextAssets.length > 0;
+  const nextVariationLimit = next.next_variation_limit || workspace.max_queued_branches || 3;
+  const missingVariationPromptIds = next.selections
+    .filter(selection => !(selection.prompt || selection.notes || '').trim())
+    .map(selection => selection.asset_id);
+  const needsVariationPrompt = missingVariationPromptIds.length > 0;
+  const safeToStart = workspace.status === 'active' && nextAssets.length > 0 && !needsVariationPrompt;
   const target: ContentAgentHandoffTarget = {
     id: workspace.id,
     latest_count: next.latest.length,
@@ -249,6 +254,9 @@ export function getLineageWorkspaceAgentHandoff(project: string): ContentAgentHa
         `Lineage workspace: ${workspace.title} (${workspace.id})`,
         workspace.notes || '',
         ...next.selections.map(selection => selection.notes ? `Use for next variation rationale (${selection.asset_id}): ${selection.notes}` : ''),
+        ...(needsVariationPrompt
+          ? [`No variation prompt was provided for ${missingVariationPromptIds.join(', ')}. Ask the user what they want changed before generating.`]
+          : []),
         ...next.warnings,
       ].filter(Boolean),
       related_assets: [...new Set([workspace.root_asset_id, ...next.latest, ...nextAssets.map(asset => asset.asset_id)])],
@@ -266,7 +274,9 @@ export function getLineageWorkspaceAgentHandoff(project: string): ContentAgentHa
       level: safeToStart ? 'info' : 'question',
       text: safeToStart
         ? `Resolved active lineage workspace ${workspace.title} for ${project}; continue from ${nextAssets.length} selected next variation base${nextAssets.length === 1 ? '' : 's'}.`
-        : `Active lineage workspace ${workspace.title} needs one to three next variation bases before generation.`,
+        : needsVariationPrompt
+          ? `Active lineage workspace ${workspace.title} has ${missingVariationPromptIds.length} queued branch${missingVariationPromptIds.length === 1 ? '' : 'es'} without a prompt. Ask the user what they want changed before generating.`
+          : `Active lineage workspace ${workspace.title} needs up to ${nextVariationLimit} next variation base${nextVariationLimit === 1 ? '' : 's'} before generation.`,
     }],
     next_action: {
       canonical_call: {
@@ -284,7 +294,9 @@ export function getLineageWorkspaceAgentHandoff(project: string): ContentAgentHa
       },
       instructions: safeToStart
         ? 'Continue this lineage workspace from the selected next variation base or bases. Generate local variations, index them, and link chosen children back to the workspace root with a one- or two-word edge summary before any S3 backup or external posting.'
-        : 'Inspect the lineage workspace and ask the human to choose "Use for next variation" before generating more variations.',
+        : needsVariationPrompt
+          ? `Inspect the lineage workspace and ask the human what they want changed for ${missingVariationPromptIds.join(', ')} before generating any variations.`
+          : 'Inspect the lineage workspace and ask the human to choose "Use for next variation" before generating more variations.',
       kind: 'continue_lineage_workspace',
       label: 'selected lineage workspace',
       lane: null,

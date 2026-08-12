@@ -12,6 +12,10 @@ export interface LineageWorkspace {
   active_at?: string;
   created_at: string;
   updated_at: string;
+  sort_position?: number;
+  collection_kind?: 'open' | 'archived';
+  revision?: number;
+  max_queued_branches?: number;
 }
 
 export interface LineageWorkspaceSnapshot {
@@ -28,6 +32,7 @@ export interface LineageWorkspaceFields {
   notes?: string;
   createdBy?: LineageWorkspaceActor;
   activate?: boolean;
+  restoreDeleted?: boolean;
   confirmWrite: boolean;
 }
 
@@ -36,5 +41,6 @@ export interface LineageWorkspaceUpdateFields {
   status?: LineageWorkspaceStatus;
   notes?: string;
   activate?: boolean;
+  maxQueuedBranches?: number;
   confirmWrite: boolean;
 }

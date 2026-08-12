@@ -179,17 +179,100 @@
   min-width: 0;
 }
 
+.context-project-name {
+  overflow: hidden;
+  color: #24424b;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-location-section {
+  display: grid;
+  gap: 8px;
+}
+
+.context-location-card {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #c9dde2;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #f8fcfc 0%, #edf7f8 100%);
+  box-shadow: 0 5px 16px rgba(21, 62, 72, 0.07);
+  color: #24424b;
+  padding: 11px;
+  text-align: left;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.context-location-card:hover,
+.context-location-card:focus-visible {
+  border-color: #80b6bf;
+  box-shadow: 0 8px 20px rgba(21, 62, 72, 0.12);
+  transform: translateY(-1px);
+}
+
+.context-location-card:focus-visible {
+  outline: 3px solid rgba(8, 127, 140, 0.2);
+  outline-offset: 2px;
+}
+
+.context-location-card-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid #b9d8dd;
+  border-radius: 10px;
+  background: #fff;
+  color: #08717c;
+}
+
+.context-location-card-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.context-location-card-copy > span {
+  color: #08717c;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.context-location-card-copy small {
+  overflow: hidden;
+  color: #678088;
+  font-size: 10px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-location-card-destination {
+  color: #78929a;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .context-location-card {
+    transition: none;
+  }
+
+  .context-location-card:hover,
+  .context-location-card:focus-visible {
+    transform: none;
+  }
+}
+
 .asset-filter-section > div {
   display: grid;
   gap: 11px;
-}
-
-.context-expand-toggle {
-  display: none;
-  margin-bottom: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.06);
-  color: #dcecef;
 }
 
 .mobile-context-close,
@@ -209,10 +292,6 @@
   transform: translateX(-12px);
   visibility: hidden;
   transition-delay: 0s, 0s, 220ms;
-}
-
-.app-shell.context-panel-collapsed .context-expand-toggle {
-  display: inline-flex;
 }
 
 @media (max-width: 760px) {
@@ -236,6 +315,7 @@
   .rail-destinations,
   .rail-bottom .rail-upload,
   .rail-bottom > button[aria-label="Settings"],
+  .rail-bottom > button[aria-label="About Lineage"],
   .rail-bottom .runtime-identity-badge {
     display: none;
   }
@@ -269,8 +349,7 @@
     max-height: calc(100dvh - 64px);
   }
 
-  .desktop-context-close,
-  .app-shell.context-panel-collapsed .context-expand-toggle {
+  .desktop-context-close {
     display: none;
   }
 

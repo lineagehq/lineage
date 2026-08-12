@@ -24,9 +24,10 @@ import {
   updateSelectedAsset,
 } from './assetLineage';
 import { getLineageBrief, linkSelectedLineageChild } from './assetLineageHandoff';
+import { nextVariationLimitFor } from './assetLineageSelection';
 import { claimLineageTask, listLineageTasks } from './assetLineageTasks';
 import { createAgentClaim } from './agentClaims';
-import { createLineageWorkspace, lineageWorkspaceId } from './assetLineageWorkspaces';
+import { createLineageWorkspace, lineageWorkspaceId, updateLineageWorkspace } from './assetLineageWorkspaces';
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require('node:sqlite') as typeof import('node:sqlite');
@@ -673,6 +674,106 @@ describe('asset lineage index', () => {
     expect(snapshot.selected).toEqual([]);
   });
 
+  it('marks a promptless re-roll as needing user direction without inventing creative instructions', () => {
+    const files = seedFiles();
+    indexLineageAssets(defaultProject);
+    const result = markLineageRerollRequest(defaultProject, {
+      rootAssetId: files.parentId,
+      nodeAssetId: files.parentId,
+      notes: '',
+      requestedBy: 'human',
+      confirmWrite: true,
+    });
+
+    expect(result.request).toMatchObject({
+      prompt_status: 'needs_prompt',
+      agent_instruction: 'No re-roll prompt was provided for this node. Ask the user what they want changed before generating.',
+    });
+    expect(result.request.prompt).toBeUndefined();
+    expect(result.task?.instructions).toBeUndefined();
+  });
+
+  it('treats whitespace-only legacy variation prompts as missing', () => {
+    const files = seedFiles();
+    indexLineageAssets(defaultProject);
+    updateSelectedAsset(defaultProject, {
+      assetId: files.parentId,
+      confirmWrite: true,
+      notes: 'Temporary branch prompt',
+      rootAssetId: files.parentId,
+    });
+    markLineageRerollRequest(defaultProject, {
+      rootAssetId: files.parentId,
+      nodeAssetId: files.parentId,
+      notes: 'Temporary re-roll prompt',
+      requestedBy: 'human',
+      confirmWrite: true,
+    });
+    const database = lineageDb();
+    database.prepare('update asset_selections set notes = ? where project_id = ? and root_asset_id = ?')
+      .run('   ', defaultProject, files.parentId);
+    database.prepare('update asset_reroll_requests set notes = ? where project_id = ? and root_asset_id = ?')
+      .run('\t ', defaultProject, files.parentId);
+    database.prepare('update lineage_tasks set instructions = ? where project_id = ? and root_asset_id = ?')
+      .run('  ', defaultProject, files.parentId);
+    database.close();
+
+    const snapshot = getLineageSnapshot(defaultProject, files.parentId);
+    expect(snapshot.selection).toMatchObject({ prompt_status: 'needs_prompt' });
+    expect(snapshot.selection?.prompt).toBeUndefined();
+    expect(snapshot.nodes.find(node => node.asset_id === files.parentId)?.branch_prompt).toBeUndefined();
+    expect(snapshot.nodes.find(node => node.asset_id === files.parentId)?.reroll_request).toMatchObject({
+      prompt_status: 'needs_prompt',
+      agent_instruction: 'No re-roll prompt was provided for this node. Ask the user what they want changed before generating.',
+    });
+    expect(snapshot.nodes.find(node => node.asset_id === files.parentId)?.reroll_request?.prompt).toBeUndefined();
+    expect(snapshot.tasks?.every(task => task.prompt_status === 'needs_prompt')).toBe(true);
+  });
+
+  it('keeps prompt metadata consistent when a re-roll prompt is cleared in a dry run', () => {
+    const files = seedFiles();
+    indexLineageAssets(defaultProject);
+
+    const fresh = markLineageRerollRequest(defaultProject, {
+      rootAssetId: files.parentId,
+      nodeAssetId: files.parentId,
+      notes: '',
+      requestedBy: 'human',
+      confirmWrite: false,
+    });
+    expect(fresh.request).toMatchObject({
+      prompt_status: 'needs_prompt',
+      agent_instruction: 'No re-roll prompt was provided for this node. Ask the user what they want changed before generating.',
+    });
+    expect(fresh.request.prompt).toBeUndefined();
+    expect(fresh.request.notes).toBeUndefined();
+
+    markLineageRerollRequest(defaultProject, {
+      rootAssetId: files.parentId,
+      nodeAssetId: files.parentId,
+      notes: 'Keep the layout and simplify the headline.',
+      requestedBy: 'human',
+      confirmWrite: true,
+    });
+    const edited = markLineageRerollRequest(defaultProject, {
+      rootAssetId: files.parentId,
+      nodeAssetId: files.parentId,
+      notes: '',
+      requestedBy: 'human',
+      confirmWrite: false,
+    });
+    expect(edited.request).toMatchObject({
+      prompt_status: 'needs_prompt',
+      agent_instruction: 'No re-roll prompt was provided for this node. Ask the user what they want changed before generating.',
+    });
+    expect(edited.request.prompt).toBeUndefined();
+    expect(edited.request.notes).toBeUndefined();
+    expect(listLineageRerollRequests(defaultProject, files.parentId).requests[0]).toMatchObject({
+      prompt: 'Keep the layout and simplify the headline.',
+      prompt_status: 'ready',
+    });
+  });
+
   it('rejects listing re-roll requests from a non-canonical child root', () => {
     const files = seedFiles();
     indexLineageAssets(defaultProject);
@@ -938,10 +1039,12 @@ describe('asset lineage index', () => {
     expect(snapshot.selection).toMatchObject({
       asset_id: files.childId,
       notes: 'Best expression for the next branch.',
+      prompt: 'Best expression for the next branch.',
     });
     expect(child).toMatchObject({
       position: { x: 320, y: 180 },
       preview_url: expect.stringContaining('/api/assets/local-preview?'),
+      branch_prompt: 'Best expression for the next branch.',
       selection_note: 'Best expression for the next branch.',
     });
   });
@@ -1124,6 +1227,39 @@ describe('asset lineage index', () => {
     });
   });
 
+  it('preserves a retained task-authored prompt while another branch is edited', () => {
+    const files = seedFiles();
+    indexLineageAssets(defaultProject);
+    updateSelectedAsset(defaultProject, {
+      assetIds: [files.parentId, files.childId],
+      confirmWrite: true,
+      mode: 'replace',
+      notes: 'Original shared prompt.',
+      rootAssetId: files.parentId,
+    });
+    const childTask = listLineageTasks(defaultProject, files.parentId).tasks.find(task => task.target_asset_id === files.childId)!;
+    const database = lineageDb();
+    database.prepare('update lineage_tasks set instructions = ? where id = ?')
+      .run('Task-authored child prompt.', childTask.id);
+    database.close();
+    claimLineageTask(defaultProject, { agentName: 'Child worker', taskId: childTask.id });
+
+    updateSelectedAsset(defaultProject, {
+      assetId: files.parentId,
+      confirmWrite: true,
+      mode: 'add',
+      notes: 'Parent-only revision.',
+      rootAssetId: files.parentId,
+    });
+
+    const snapshot = getLineageSnapshot(defaultProject, files.parentId);
+    expect(snapshot.nodes.find(node => node.asset_id === files.childId)?.branch_prompt).toBe('Task-authored child prompt.');
+    expect(listLineageTasks(defaultProject, files.parentId).tasks.find(task => task.target_asset_id === files.childId)).toMatchObject({
+      instructions: 'Task-authored child prompt.',
+      status: 'claimed',
+    });
+  });
+
   it('cancels pending iterate tasks when selected assets are removed', () => {
     const files = seedFiles();
     indexLineageAssets(defaultProject);
@@ -1161,6 +1297,7 @@ describe('asset lineage index', () => {
       assetIds: [files.parentId, files.childId],
       confirmWrite: true,
       mode: 'replace',
+      notes: 'Preserve this claimed branch prompt.',
       rootAssetId: files.parentId,
     });
     const tasks = listLineageTasks(defaultProject, files.parentId).tasks;
@@ -1251,6 +1388,7 @@ describe('asset lineage index', () => {
     const marked = markLineageRerollRequest(defaultProject, {
       confirmWrite: true,
       nodeAssetId: files.parentId,
+      notes: 'Preserve this claimed re-roll prompt.',
       requestedBy: 'human',
       rootAssetId: files.parentId,
     });
@@ -1318,6 +1456,117 @@ describe('asset lineage index', () => {
     })).toThrow('Select at most 3 assets for next variation');
   });
 
+  it('enforces the workspace branch limit even when a client asks for a larger cap', () => {
+    const files = seedFiles();
+    indexLineageAssets(defaultProject);
+    const workspace = createLineageWorkspace(defaultProject, {
+      confirmWrite: true,
+      rootAssetId: files.parentId,
+      title: 'Limited queue',
+    }).workspace!;
+    updateLineageWorkspace(defaultProject, workspace.id, { confirmWrite: true, maxQueuedBranches: 2 });
+
+    expect(() => updateSelectedAsset(defaultProject, {
+      assetIds: [files.parentId, files.childId, files.variationId],
+      confirmWrite: true,
+      maxSelections: 12,
+      mode: 'replace',
+      rootAssetId: files.parentId,
+    })).toThrow('Select at most 2 assets for next variation');
+    expect(getLineageSnapshot(defaultProject, files.parentId).next_variation_limit).toBe(2);
+  });
+
+  it('uses the default branch limit for a legacy read-only database without the workspace column', () => {
+    mkdirSync(scratchDir, { recursive: true });
+    const legacyPath = join(scratchDir, 'legacy-lineage.sqlite');
+    const writer = new DatabaseSync(legacyPath);
+    writer.exec(`
+      create table lineage_workspaces (
+        project_id text not null,
+        root_asset_id text not null
+      );
+      insert into lineage_workspaces (project_id, root_asset_id)
+      values ('legacy-project', 'legacy-root');
+    `);
+    writer.close();
+
+    const reader = new DatabaseSync(legacyPath, { readOnly: true });
+    try {
+      expect(nextVariationLimitFor(reader, 'legacy-project', 'legacy-root')).toBe(3);
+    } finally {
+      reader.close();
+    }
+  });
+
+  it('keeps existing selections when the workspace limit is lowered and blocks only new additions', () => {
+    const files = seedFiles();
+    indexLineageAssets(defaultProject);
+    const workspace = createLineageWorkspace(defaultProject, {
+      confirmWrite: true,
+      rootAssetId: files.parentId,
+      title: 'Lowered queue',
+    }).workspace!;
+    updateSelectedAsset(defaultProject, {
+      assetIds: [files.parentId, files.childId, files.variationId],
+      confirmWrite: true,
+      mode: 'replace',
+      rootAssetId: files.parentId,
+    });
+    updateLineageWorkspace(defaultProject, workspace.id, { confirmWrite: true, maxQueuedBranches: 2 });
+
+    expect(getLineageSnapshot(defaultProject, files.parentId).selected).toHaveLength(3);
+    expect(() => updateSelectedAsset(defaultProject, {
+      assetId: files.parentId,
+      confirmWrite: true,
+      mode: 'add',
+      notes: 'Editing while above the limit is still safe.',
+      rootAssetId: files.parentId,
+    })).not.toThrow();
+    expect(() => updateSelectedAsset(defaultProject, {
+      assetIds: [files.parentId, files.childId, files.alternateId],
+      confirmWrite: true,
+      mode: 'replace',
+      rootAssetId: files.parentId,
+    })).toThrow('Select at most 2 assets for next variation');
+    expect(() => updateSelectedAsset(defaultProject, {
+      assetIds: [files.variationId, files.alternateId],
+      confirmWrite: true,
+      mode: 'toggle',
+      rootAssetId: files.parentId,
+    })).toThrow('Select at most 2 assets for next variation');
+    updateSelectedAsset(defaultProject, { assetId: files.variationId, confirmWrite: true, mode: 'remove', rootAssetId: files.parentId });
+    expect(() => updateSelectedAsset(defaultProject, {
+      assetId: files.alternateId,
+      confirmWrite: true,
+      mode: 'add',
+      rootAssetId: files.parentId,
+    })).toThrow('Select at most 2 assets for next variation');
+  });
+
+  it('persists promptless branches and clears an existing prompt from its pending task', () => {
+    const files = seedFiles();
+    indexLineageAssets(defaultProject);
+    updateSelectedAsset(defaultProject, {
+      assetId: files.parentId,
+      confirmWrite: true,
+      notes: 'Make this editorial.',
+      rootAssetId: files.parentId,
+    });
+    updateSelectedAsset(defaultProject, {
+      assetId: files.parentId,
+      confirmWrite: true,
+      mode: 'add',
+      notes: '',
+      rootAssetId: files.parentId,
+    });
+
+    const snapshot = getLineageSnapshot(defaultProject, files.parentId);
+    expect(snapshot.selection).toMatchObject({ asset_id: files.parentId });
+    expect(snapshot.selection?.prompt).toBeUndefined();
+    expect(snapshot.nodes.find(node => node.asset_id === files.parentId)?.branch_prompt).toBeUndefined();
+    expect(snapshot.tasks?.find(task => task.task_type === 'iterate')?.instructions).toBeUndefined();
+  });
+
   it('adds, removes, toggles, and clears selected next variation assets independently', () => {
     const files = seedFiles();
     indexLineageAssets(defaultProject);
@@ -1360,6 +1609,33 @@ describe('asset lineage index', () => {
     expect(brief.brief.prompt).toContain(`Create 3-4 variations using these 2 selected references: ${files.parentId}, ${files.childId}`);
     expect(brief.brief.prompt).toContain('Blend the strongest pieces.');
     expect(brief.handoff.link_child_command).toContain('link-child');
+  });
+
+  it('tells the agent to ask before generating a promptless queued branch', () => {
+    const files = seedFiles();
+    indexLineageAssets(defaultProject);
+    updateSelectedAsset(defaultProject, { assetId: files.parentId, confirmWrite: true, rootAssetId: files.parentId });
+
+    const brief = getLineageBrief(defaultProject, files.parentId);
+    expect(brief.brief.prompt).toContain(`No variation prompt was provided for ${files.parentId}. Ask the user what they want changed before generating.`);
+    expect(brief.brief.prompt).not.toContain('Preserve the strongest visible ideas');
+    expect(brief.warnings).toContain(`Missing variation prompt for ${files.parentId}; ask the user before generating.`);
+  });
+
+  it('uses the workspace branch limit in no-selection agent guidance', () => {
+    const files = seedFiles();
+    indexLineageAssets(defaultProject);
+    linkLineageAssets(defaultProject, { childAssetId: files.childId, confirmWrite: true, parentAssetId: files.parentId });
+    linkLineageAssets(defaultProject, { childAssetId: files.variationId, confirmWrite: true, parentAssetId: files.parentId });
+    const workspace = createLineageWorkspace(defaultProject, {
+      confirmWrite: true,
+      rootAssetId: files.parentId,
+      title: 'Two-branch queue',
+    }).workspace!;
+    updateLineageWorkspace(defaultProject, workspace.id, { confirmWrite: true, maxQueuedBranches: 2 });
+
+    const brief = getLineageBrief(defaultProject, files.parentId);
+    expect(brief.brief.prompt).toBe('Select up to 2 latest lineage candidates before generating variations.');
   });
 
   it('uses the resolved profile manifest instead of a direct database path in generated handoffs', () => {

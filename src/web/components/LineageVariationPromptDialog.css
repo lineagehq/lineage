@@ -1,0 +1,80 @@
+.lineage-prompt-backdrop {
+  align-items: center;
+  background: color-mix(in srgb, var(--ink, #17222b) 30%, transparent);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 24px;
+  position: fixed;
+  z-index: 140;
+}
+
+.lineage-prompt-backdrop.anchored { background: rgba(18, 34, 43, .08); }
+
+.lineage-prompt-dialog {
+  background: #fff;
+  border: 1px solid #b8d2d9;
+  border-radius: 24px;
+  box-shadow: 0 28px 80px rgb(21 55 64 / 24%);
+  color: #17222b;
+  display: grid;
+  gap: 15px;
+  max-width: 480px;
+  padding: 20px;
+  width: min(100%, 480px);
+}
+
+.lineage-prompt-dialog.anchored { position: fixed; width: min(430px, calc(100vw - 32px)); }
+
+.lineage-prompt-dialog header {
+  align-items: flex-start;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: auto 1fr auto;
+}
+
+.lineage-prompt-dialog h2,
+.lineage-prompt-dialog p { margin: 0; }
+.lineage-prompt-dialog h2 { font-size: clamp(1.25rem, 2.4vw, 1.65rem); letter-spacing: -.035em; }
+.lineage-prompt-dialog header p { color: #61717a; margin-top: 4px; }
+
+.lineage-prompt-icon {
+  align-items: center;
+  background: #dff4f6;
+  border-radius: 14px;
+  color: #087f8c;
+  display: inline-flex;
+  height: 46px;
+  justify-content: center;
+  width: 46px;
+}
+.lineage-prompt-icon.reroll { background: #fff0dc; color: #ad640c; }
+.lineage-prompt-eyebrow { color: #66757e; display: block; font-size: .72rem; font-weight: 800; letter-spacing: .12em; margin-bottom: 4px; text-transform: uppercase; }
+.lineage-prompt-close { background: transparent; border: 0; color: #62727a; font-size: 1.7rem; line-height: 1; padding: 3px 7px; }
+
+.lineage-prompt-field { display: grid; font-weight: 750; gap: 8px; }
+.lineage-prompt-field textarea {
+  background: #f8fbfb;
+  border: 2px solid #bdd7dd;
+  border-radius: 16px;
+  box-sizing: border-box;
+  color: #17222b;
+  font: inherit;
+  line-height: 1.5;
+  min-height: 120px;
+  padding: 13px;
+  resize: vertical;
+  width: 100%;
+}
+.lineage-prompt-field textarea:focus { border-color: #0794a2; box-shadow: 0 0 0 4px rgb(7 148 162 / 12%); outline: 0; }
+.lineage-prompt-field small { color: #697881; display: flex; font-weight: 500; justify-content: space-between; }
+
+.lineage-prompt-dialog footer { display: flex; gap: 10px; justify-content: flex-end; }
+
+@media (max-width: 640px) {
+  .lineage-prompt-backdrop { align-items: flex-end; padding: 0; }
+  .lineage-prompt-dialog { border-radius: 24px 24px 0 0; max-width: none; padding: 20px; }
+  .lineage-prompt-dialog.anchored { position: static; width: 100%; }
+  .lineage-prompt-dialog header { grid-template-columns: auto 1fr auto; }
+  .lineage-prompt-dialog footer button { flex: 1; }
+}

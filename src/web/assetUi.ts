@@ -11,7 +11,6 @@ export interface Toast {
   message: string;
 }
 
-export const defaultProject = 'demo-project';
 export const statusFilters: StatusFilter[] = ['all', 'working', 'approved', 'published', 'archived', 'planned'];
 export const placementFilters: PlacementFilter[] = ['all', 'planned', 'scheduled', 'posted', 'skipped', 'not-posted'];
 export const sourceFilters: SourceFilter[] = ['local', 'catalog', 'all'];

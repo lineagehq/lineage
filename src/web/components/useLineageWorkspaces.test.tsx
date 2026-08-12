@@ -30,47 +30,42 @@ let container: HTMLDivElement | null = null;
 afterEach(() => { if (root) act(() => root?.unmount()); root = null; container?.remove(); container = null; vi.restoreAllMocks(); vi.clearAllMocks(); });
 
 describe('useLineageWorkspaces dirty transition coordination', () => {
-  it('ignores a stale workspace completion after transaction ownership advances', async () => {
-    const activation = deferred<{ workspace: LineageWorkspace }>(); const transaction = transactionContract(); const selected = vi.fn();
-    vi.mocked(api).mockImplementation((path: string) => path.endsWith('/activate') ? activation.promise : Promise.resolve(snapshot(first)));
+  it('ignores a stale workspace refresh after transaction ownership advances', async () => {
+    const refresh = deferred<LineageWorkspaceSnapshot>(); const transaction = transactionContract(); const selected = vi.fn();
+    vi.mocked(api).mockImplementation(() => refresh.promise);
     let latest!: ReturnType<typeof useLineageWorkspaces>;
-    function Harness() { latest = useLineageWorkspaces({ isTransitionOwner: transaction.isOwner, onBeforeTransition: transaction.before, onSelectedAsset: selected, onToast: vi.fn(), onTransitionSettled: transaction.settled, project: 'demo' }); return null; }
+    function Harness() { latest = useLineageWorkspaces({ isTransitionOwner: transaction.isOwner, onBeforeTransition: transaction.before, onSelectedAsset: selected, onToast: vi.fn(), onTransitionSettled: transaction.settled, project: 'demo', workspaceId: 'workspace-1' }); return null; }
     container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
     await act(async () => root!.render(createElement(Harness)));
-    const pending = latest.activateWorkspace('workspace-2');
+    const pending = latest.refreshWorkspaces();
     transaction.supersede();
-    await act(async () => activation.resolve({ workspace: second })); await act(async () => pending);
+    await act(async () => refresh.resolve(snapshot(first))); await act(async () => pending);
     expect(selected).not.toHaveBeenCalled();
     expect(transaction.reset).not.toHaveBeenCalled();
     expect(transaction.settled).not.toHaveBeenCalled();
-    expect(vi.mocked(api).mock.calls.filter(([path]) => String(path).startsWith('/api/lineage-workspaces?'))).toHaveLength(0);
+    expect(vi.mocked(api).mock.calls.filter(([path]) => String(path).startsWith('/api/lineage-workspaces?'))).toHaveLength(1);
   });
 
-  it('settles deferred workspace mutations transactionally and resets only after complete success', async () => {
-    const activation = deferred<{ workspace: LineageWorkspace }>();
+  it('settles failed and initial workspace refreshes without resetting the Canvas', async () => {
     let failRefresh = false;
     const transaction = transactionContract();
     vi.mocked(api).mockImplementation((path: string) => {
       if (path.startsWith('/api/lineage-workspaces?')) return failRefresh ? Promise.reject(new Error('refresh failed')) : Promise.resolve(snapshot(second));
-      if (path.endsWith('/activate')) return activation.promise;
       return Promise.resolve({});
     });
     let latest!: ReturnType<typeof useLineageWorkspaces>;
-    function Harness() { latest = useLineageWorkspaces({ isTransitionOwner: transaction.isOwner, onBeforeTransition: transaction.before, onSelectedAsset: vi.fn(), onToast: vi.fn(), onTransitionSettled: transaction.settled, project: 'demo' }); return null; }
+    function Harness() { latest = useLineageWorkspaces({ isTransitionOwner: transaction.isOwner, onBeforeTransition: transaction.before, onSelectedAsset: vi.fn(), onToast: vi.fn(), onTransitionSettled: transaction.settled, project: 'demo', workspaceId: 'workspace-2' }); return null; }
     container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
     await act(async () => root!.render(createElement(Harness)));
-    const pending = latest.activateWorkspace('workspace-2');
-    expect(transaction.before).toHaveBeenCalledTimes(1); expect(transaction.settled).not.toHaveBeenCalled(); expect(transaction.reset).not.toHaveBeenCalled();
     failRefresh = true;
-    await act(async () => activation.resolve({ workspace: second }));
+    const pending = latest.refreshWorkspaces();
+    expect(transaction.before).toHaveBeenCalledTimes(1); expect(transaction.settled).not.toHaveBeenCalled(); expect(transaction.reset).not.toHaveBeenCalled();
     await act(async () => pending);
     expect(transaction.settled).toHaveBeenLastCalledWith(1, 'failure'); expect(transaction.reset).not.toHaveBeenCalled();
 
     failRefresh = false;
-    const success = latest.activateWorkspace('workspace-2');
-    await act(async () => activation.resolve({ workspace: second }));
-    await act(async () => success);
-    expect(transaction.settled).toHaveBeenLastCalledWith(2, 'success'); expect(transaction.reset).toHaveBeenCalledTimes(1);
+    await act(async () => { await latest.refreshWorkspaces(); });
+    expect(transaction.settled).toHaveBeenLastCalledWith(2, 'noop'); expect(transaction.reset).not.toHaveBeenCalled();
   });
 
   it('cancels mutations and automatic source replacement, then resets once after acceptance', async () => {
@@ -88,7 +83,7 @@ describe('useLineageWorkspaces dirty transition coordination', () => {
       return Promise.reject(new Error(`Unexpected ${path}`));
     });
     let latest!: ReturnType<typeof useLineageWorkspaces>;
-    function Harness() { latest = useLineageWorkspaces({ isTransitionOwner: transaction.isOwner, onBeforeTransition: transaction.before, onSelectedAsset: selected, onToast: toast, onTransitionSettled: transaction.settled, project: 'demo' }); return null; }
+    function Harness() { latest = useLineageWorkspaces({ isTransitionOwner: transaction.isOwner, onBeforeTransition: transaction.before, onSelectedAsset: selected, onToast: toast, onTransitionSettled: transaction.settled, project: 'demo', workspaceId: 'workspace-1' }); return null; }
     container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
     await act(async () => root!.render(createElement(Harness)));
     await act(async () => { await latest.refreshWorkspaces(); });
@@ -107,11 +102,10 @@ describe('useLineageWorkspaces dirty transition coordination', () => {
 
     transaction.setEnabled(true);
     await act(async () => { await latest.refreshWorkspaces(); });
-    expect(latest.workspaceRootAssetId).toBe('root-2');
-    expect(transaction.reset).toHaveBeenCalledTimes(1);
+    expect(latest.workspaceRootAssetId).toBe('root-1');
+    expect(transaction.reset).not.toHaveBeenCalled();
     await act(async () => { await latest.activateWorkspace('workspace-2'); });
-    expect(latest.workspaceRootAssetId).toBe('root-2');
-    expect(transaction.reset).toHaveBeenCalledTimes(2);
+    expect(transaction.reset).toHaveBeenCalledTimes(1);
     expect(selected).toHaveBeenLastCalledWith('root-2');
   });
 
@@ -126,7 +120,7 @@ describe('useLineageWorkspaces dirty transition coordination', () => {
       return Promise.resolve({});
     });
     let latest!: ReturnType<typeof useLineageWorkspaces>;
-    function Harness() { latest = useLineageWorkspaces({ isTransitionOwner: transaction.isOwner, onBeforeTransition: transaction.before, onSelectedAsset: vi.fn(), onToast: vi.fn(), onTransitionSettled: transaction.settled, project: 'demo' }); return null; }
+    function Harness() { latest = useLineageWorkspaces({ isTransitionOwner: transaction.isOwner, onBeforeTransition: transaction.before, onSelectedAsset: vi.fn(), onToast: vi.fn(), onTransitionSettled: transaction.settled, project: 'demo', workspaceId: 'workspace-1' }); return null; }
     container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
     await act(async () => root!.render(createElement(Harness)));
     await act(async () => { await latest.refreshWorkspaces(); });

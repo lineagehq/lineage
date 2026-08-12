@@ -33,8 +33,30 @@ export function lineageDb(): DatabaseSync {
     create table if not exists projects (
       id text primary key,
       product text not null,
+      display_name text,
       catalog_path text,
+      catalog_state text not null default 'ready',
+      sort_position integer not null default 0,
       created_at text not null,
+      updated_at text not null
+    );
+    create table if not exists project_collection_state (
+      singleton_id text primary key check (singleton_id = 'projects'),
+      revision integer not null default 1 check (revision > 0),
+      updated_at text not null
+    );
+    create table if not exists project_tombstones (
+      project_key text primary key,
+      display_name text not null,
+      catalog_path text,
+      deleted_at text not null,
+      finalized_at text,
+      reason text
+    );
+    create table if not exists demo_bootstrap_state (
+      demo_id text primary key,
+      suppressed_at text,
+      restored_at text,
       updated_at text not null
     );
     create table if not exists assets (
@@ -131,6 +153,22 @@ export function lineageDb(): DatabaseSync {
     );
     create index if not exists asset_social_marks_root_active
       on asset_social_marks(project_id, root_asset_id, unmarked_at, marked_at);
+    create table if not exists asset_discussion_marks (
+      id text primary key,
+      project_id text not null references projects(id),
+      root_asset_id text not null references assets(id),
+      asset_id text not null references assets(id),
+      notes text,
+      marked_by text not null,
+      marked_at text not null,
+      unmarked_by text,
+      unmarked_at text,
+      updated_at text not null,
+      updated_by text,
+      unique(project_id, root_asset_id, asset_id)
+    );
+    create index if not exists asset_discussion_marks_root_active
+      on asset_discussion_marks(project_id, root_asset_id, unmarked_at, marked_at);
     create table if not exists asset_reviews (
       asset_id text primary key references assets(id),
       review_state text not null check (review_state in ('unreviewed', 'approved', 'needs_revision', 'rejected', 'ignored')),
@@ -169,10 +207,29 @@ export function lineageDb(): DatabaseSync {
       active_at text,
       created_at text not null,
       updated_at text not null,
+      sort_position integer not null default 0,
+      collection_kind text not null default 'open',
+      revision integer not null default 1,
+      max_queued_branches integer not null default 3 check (max_queued_branches between 1 and 12),
       unique(project_id, root_asset_id)
     );
     create index if not exists lineage_workspaces_project_status on lineage_workspaces(project_id, status, updated_at);
     create index if not exists lineage_workspaces_project_active on lineage_workspaces(project_id, active_at);
+    create table if not exists workspace_collection_state (
+      project_id text not null references projects(id),
+      collection_kind text not null check (collection_kind in ('open', 'archived')),
+      revision integer not null default 1 check (revision > 0),
+      updated_at text not null,
+      primary key(project_id, collection_kind)
+    );
+    create table if not exists deleted_lineage_workspaces (
+      project_id text not null references projects(id),
+      root_asset_id text not null,
+      workspace_id text not null,
+      deleted_at text not null,
+      deletion_digest text not null,
+      primary key(project_id, root_asset_id)
+    );
     create table if not exists asset_ledger_records (
       id text primary key,
       project_id text not null references projects(id),
@@ -660,13 +717,41 @@ export function lineageDb(): DatabaseSync {
     create index if not exists agent_claim_events_claim_created on agent_claim_events(claim_id, created_at);
   `);
   ensureColumn(database, 'asset_edges', 'summary', 'text');
+  ensureColumn(database, 'projects', 'display_name', 'text');
+  ensureColumn(database, 'projects', 'catalog_state', "text not null default 'ready'");
+  ensureColumn(database, 'projects', 'sort_position', 'integer not null default 0');
+  ensureColumn(database, 'lineage_workspaces', 'sort_position', 'integer not null default 0');
+  ensureColumn(database, 'lineage_workspaces', 'collection_kind', "text not null default 'open'");
+  ensureColumn(database, 'lineage_workspaces', 'revision', 'integer not null default 1');
+  database.prepare("insert or ignore into project_collection_state (singleton_id, revision, updated_at) values ('projects', 1, ?)").run(nowIso());
+  database.prepare(`
+    update projects
+    set display_name = coalesce(nullif(display_name, ''), product, id),
+        catalog_state = coalesce(nullif(catalog_state, ''), 'ready')
+  `).run();
+  database.prepare(`
+    update lineage_workspaces
+    set collection_kind = case when status = 'archived' then 'archived' else 'open' end,
+        revision = case when revision < 1 then 1 else revision end
+  `).run();
+  database.prepare(`
+    insert or ignore into workspace_collection_state (project_id, collection_kind, revision, updated_at)
+    select id, 'open', 1, ? from projects
+  `).run(nowIso());
+  database.prepare(`
+    insert or ignore into workspace_collection_state (project_id, collection_kind, revision, updated_at)
+    select id, 'archived', 1, ? from projects
+  `).run(nowIso());
+  normalizeManualPositions(database);
   ensureColumn(database, 'asset_edges', 'summary_created_by', "text check (summary_created_by in ('human', 'agent', 'system'))");
   ensureColumn(database, 'asset_edges', 'summary_updated_by', "text check (summary_updated_by in ('human', 'agent', 'system'))");
   ensureColumn(database, 'asset_edges', 'summary_updated_at', 'text');
+  ensureColumn(database, 'asset_discussion_marks', 'updated_by', 'text');
   ensureColumn(database, 'generation_job_outputs', 'edge_summary', 'text');
   migrateAssetSelections(database);
   dropLegacyAssetSelectionRootUnique(database);
   ensureColumn(database, 'asset_selections', 'notes', 'text');
+  ensureColumn(database, 'lineage_workspaces', 'max_queued_branches', 'integer not null default 3 check (max_queued_branches between 1 and 12)');
   backfillLineageTasks(database);
   ensureColumn(database, 'asset_ledger_records', 'first_seen_at', 'text');
   ensureColumn(database, 'asset_ledger_records', 'indexed_by_run_id', 'text');
@@ -676,7 +761,144 @@ export function lineageDb(): DatabaseSync {
   ensureAgentClaimScopeValues(database);
   ensureGenerationReceiptCheckValues(database);
   ensureSocialVariantRevisionSchema(database);
+  ensureLifecycleWriteGuards(database);
   return database;
+}
+
+function quoteIdentifier(value: string): string {
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+function ensureLifecycleWriteGuards(database: DatabaseSync): void {
+  const tables = database.prepare(`
+    select name from sqlite_master
+    where type = 'table' and name not like 'sqlite_%'
+    order by name
+  `).all() as Array<{ name: string }>;
+  for (const { name } of tables) {
+    const columns = new Set(
+      (database.prepare(`pragma table_info(${quoteIdentifier(name)})`).all() as Array<{ name: string }>)
+        .map(column => column.name),
+    );
+    const table = quoteIdentifier(name);
+    if (name === 'projects') {
+      for (const operation of ['insert', 'update'] as const) {
+        database.exec(`
+          create trigger if not exists ${quoteIdentifier(`lifecycle_guard_project_${operation}`)}
+          before ${operation} on ${table}
+          when exists (
+            select 1 from project_tombstones where project_key = new.id
+          )
+          begin
+            select raise(abort, 'lineage_project_deleted');
+          end
+        `);
+      }
+    }
+    if (columns.has('project_id')) {
+      for (const operation of ['insert', 'update'] as const) {
+        database.exec(`
+          create trigger if not exists ${quoteIdentifier(`lifecycle_guard_${name}_project_${operation}`)}
+          before ${operation} on ${table}
+          when exists (
+            select 1 from project_tombstones where project_key = new.project_id
+          )
+          begin
+            select raise(abort, 'lineage_project_deleted');
+          end
+        `);
+      }
+    }
+    if (columns.has('project_id') && columns.has('root_asset_id') && name !== 'deleted_lineage_workspaces') {
+      for (const operation of ['insert', 'update'] as const) {
+        database.exec(`
+          create trigger if not exists ${quoteIdentifier(`lifecycle_guard_${name}_workspace_${operation}`)}
+          before ${operation} on ${table}
+          when exists (
+            select 1 from deleted_lineage_workspaces
+            where project_id = new.project_id and root_asset_id = new.root_asset_id
+          )
+          begin
+            select raise(abort, 'lineage_workspace_deleted');
+          end
+        `);
+      }
+    }
+  }
+  for (const operation of ['insert', 'update'] as const) {
+    database.exec(`
+      create trigger if not exists ${quoteIdentifier(`lifecycle_guard_agent_claim_workspace_${operation}`)}
+      before ${operation} on agent_claims
+      when new.scope_type = 'lineage_workspace' and exists (
+        select 1 from deleted_lineage_workspaces deleted
+        where deleted.project_id = new.project_id
+          and (
+            deleted.workspace_id = new.target_id
+            or new.target_id = deleted.project_id || ':lineage-workspace:' || deleted.root_asset_id
+          )
+      )
+      begin
+        select raise(abort, 'lineage_workspace_deleted');
+      end
+    `);
+  }
+}
+
+export function isLifecycleWriteGuardError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('lineage_project_deleted') || message.includes('lineage_workspace_deleted');
+}
+
+function normalizeManualPositions(database: DatabaseSync): void {
+  const projects = database.prepare(`
+    select id, sort_position from projects order by sort_position, created_at, id
+  `).all() as Array<{ id: string; sort_position: number }>;
+  const updateProject = database.prepare('update projects set sort_position = ? where id = ?');
+  let projectPositionsChanged = false;
+  projects.forEach((project, index) => {
+    if (Number(project.sort_position) !== index) {
+      updateProject.run(index, project.id);
+      projectPositionsChanged = true;
+    }
+  });
+  if (projectPositionsChanged) {
+    database.prepare(`
+      insert into project_collection_state (singleton_id, revision, updated_at)
+      values ('projects', 2, ?)
+      on conflict(singleton_id) do update
+      set revision = revision + 1, updated_at = excluded.updated_at
+    `).run(nowIso());
+  }
+
+  const collections = database.prepare(`
+    select distinct project_id, collection_kind from lineage_workspaces
+    order by project_id, collection_kind
+  `).all() as Array<{ project_id: string; collection_kind: string }>;
+  const updateWorkspace = database.prepare(`
+    update lineage_workspaces set sort_position = ? where project_id = ? and id = ?
+  `);
+  for (const collection of collections) {
+    const workspaces = database.prepare(`
+      select id, sort_position from lineage_workspaces
+      where project_id = ? and collection_kind = ?
+      order by sort_position, created_at, id
+    `).all(collection.project_id, collection.collection_kind) as Array<{ id: string; sort_position: number }>;
+    let workspacePositionsChanged = false;
+    workspaces.forEach((workspace, index) => {
+      if (Number(workspace.sort_position) !== index) {
+        updateWorkspace.run(index, collection.project_id, workspace.id);
+        workspacePositionsChanged = true;
+      }
+    });
+    if (workspacePositionsChanged) {
+      database.prepare(`
+        insert into workspace_collection_state (project_id, collection_kind, revision, updated_at)
+        values (?, ?, 2, ?)
+        on conflict(project_id, collection_kind) do update
+        set revision = revision + 1, updated_at = excluded.updated_at
+      `).run(collection.project_id, collection.collection_kind, nowIso());
+    }
+  }
 }
 
 export function backfillLineageTasks(database: DatabaseSync): void {

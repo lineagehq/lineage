@@ -7,6 +7,7 @@ import { getLineageSnapshot, indexLineageAssets, linkLineageAssets, updateLineag
 import { lineageDb } from './assetLineageDb';
 import { removeLineageNode } from './assetLineageRemove';
 import { listAssetSocialMarks, markAssetSocial } from './assetSocialMarks';
+import { listAssetDiscussionMarks, markAssetDiscussion } from './assetDiscussionMarks';
 import { createAgentClaim } from './agentClaims';
 import { lineageWorkspaceId } from './assetLineageWorkspaces';
 import { fileSha256 } from './localReview';
@@ -123,6 +124,22 @@ describe('lineage node removal', () => {
     } finally {
       database.close();
     }
+  });
+
+  it('deactivates a Discussion mark when removing its node so relinking does not resurrect it', () => {
+    const files = seedFiles();
+    indexLineageAssets(defaultProject);
+    linkLineageAssets(defaultProject, { childAssetId: files.childId, confirmWrite: true, parentAssetId: files.parentId });
+    markAssetDiscussion(defaultProject, { asset: files.childId, confirmWrite: true, markedBy: 'human:owner', rootAssetId: files.parentId });
+    removeLineageNode(defaultProject, { assetId: files.childId, confirmWrite: true, rootAssetId: files.parentId });
+    linkLineageAssets(defaultProject, { childAssetId: files.childId, confirmWrite: true, parentAssetId: files.parentId });
+    expect(listAssetDiscussionMarks(defaultProject, files.parentId).marks).toEqual([]);
+    const database = lineageDb();
+    try {
+      expect(database.prepare(`select unmarked_by, unmarked_at from asset_discussion_marks where project_id = ? and root_asset_id = ? and asset_id = ?`).get(defaultProject, files.parentId, files.childId)).toMatchObject({
+        unmarked_by: 'lineage:remove-node', unmarked_at: expect.any(String),
+      });
+    } finally { database.close(); }
   });
 
   it('requires a matching active claim for confirmed node removal on a claimed workspace', () => {

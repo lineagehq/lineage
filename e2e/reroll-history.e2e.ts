@@ -1,21 +1,24 @@
 import { expect, test } from 'playwright/test';
 
-const project = 'demo-project';
+const project = 'swissifier-demo';
 const rootAssetId = 'local-5748fb8ba6df';
 const stackedNodeTitle = 'swissifier vertical before after v1';
 const stackedNodeId = 'local-27050bc5c393';
+let workspaceId = '';
 
 test.beforeEach(async ({ request }) => {
   const seeded = await request.post('/api/lineage-workspaces/demo/swissifier/seed', {
     data: { confirmWrite: true, project },
   });
   expect(seeded.ok()).toBe(true);
+  workspaceId = (await seeded.json() as { workspace?: { id: string } }).workspace?.id || '';
+  if (!workspaceId) throw new Error('Swissifier seed did not return an exact workspace ID');
 });
 
 test('browses and promotes re-roll history without panning the background canvas', async ({ page, request }) => {
-  await page.goto(`/?project=${project}`);
+  await page.goto(`/projects/${project}/workspaces/${encodeURIComponent(workspaceId)}`);
 
-  await expect(page.getByRole('region', { name: 'Canvas workspace tools' }).locator('.lineage-workspace-trigger strong')).toHaveText('Swissifier rich demo', { timeout: 20_000 });
+  await expect(page.locator('.lineage-workspace-title strong')).toHaveText('Swissifier rich demo', { timeout: 20_000 });
   const node = page.locator('.lineage-node', { hasText: stackedNodeTitle }).first();
   await expect(node).toBeVisible();
   await expect(node.locator('.attempt-stack')).toHaveText('v3');

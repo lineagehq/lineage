@@ -1,11 +1,13 @@
 {
-  "reviewedFor": "0.1.32",
+  "reviewedFor": "0.1.35",
   "result": "updated",
   "areas": [
     "reference-interface",
     "navigation-shell",
     "canvas-settings",
     "canvas-branch-collapse",
+    "canvas-variation-queue",
+    "discussion-flags",
     "about-lineage"
   ]
 }

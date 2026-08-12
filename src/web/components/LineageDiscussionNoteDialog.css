@@ -1,0 +1,32 @@
+.lineage-discussion-note-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10010;
+  background: rgba(10, 30, 37, 0.18);
+}
+
+.lineage-discussion-note-dialog {
+  position: fixed;
+  display: grid;
+  width: min(430px, 100%);
+  gap: 16px;
+  border: 1px solid #bed7dc;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(9, 35, 43, 0.25);
+  padding: 20px;
+}
+
+.lineage-discussion-note-dialog header { display: grid; gap: 3px; }
+.lineage-discussion-note-dialog header > span { color: #08717c; font-size: 10px; font-weight: 900; letter-spacing: .07em; text-transform: uppercase; }
+.lineage-discussion-note-dialog h3,
+.lineage-discussion-note-dialog p { margin: 0; }
+.lineage-discussion-note-dialog header p,
+.lineage-discussion-note-help { color: var(--muted); font-size: 12px; }
+.lineage-discussion-note-dialog label { display: grid; gap: 6px; color: #28464f; font-size: 12px; font-weight: 850; }
+.lineage-discussion-note-dialog textarea { resize: vertical; min-height: 92px; border: 1px solid #bdd3d9; border-radius: 9px; padding: 10px; font: inherit; }
+.lineage-discussion-note-dialog footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+
+@media (max-width: 520px) {
+  .lineage-discussion-note-dialog { inset: auto 0 0; width: 100%; border-radius: 16px 16px 0 0; }
+}

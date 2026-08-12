@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 0.1.35
+
+- Redesign Canvas-to-Workspaces navigation and contextual controls so destinations and actions read clearly across desktop and mobile layouts.
+- Add Canvas-scoped Discussion flags with optional notes, editing, keyboard access, CLI and API support, lifecycle cleanup, and agent-readable handoff context.
+- Add independent Canvas preferences for preview actions, Discussion notes, and Branch or Re-roll prompting while keeping compact node actions visibly stateful.
+
+## 0.1.34
+
+- Add prompt-first Canvas actions for branches and re-rolls, preserving each exact instruction on its node and in agent-readable task, packet, brief, and generation handoffs.
+- Add a unified Variation Queue that highlights every queued node, focuses the selected node beside the panel, and supports inline prompt editing, quiet removal, keyboard shortcuts, and responsive desktop and mobile layouts.
+- Keep promptless work explicit so agents ask what should change, protect claimed instructions from conflicting edits, and expose workspace branch limits plus prompt-editing behavior in Canvas settings.
+
+## 0.1.33
+
+- Make Projects the global home and give every project a dedicated Workspaces directory with paginated card and list views, search, sorting, durable animated manual ordering, and responsive keyboard- and touch-friendly controls.
+- Open projects through their workspace lists and workspaces through canonical Canvas URLs, while preserving the last valid Canvas, presentation, and contextual-panel state across project-scoped navigation.
+- Add guarded project and workspace lifecycle operations with confirmed cascade deletion, stale-state protection, rollback, shared-graph preservation, and SQLite-authoritative cleanup without deleting physical media.
+
 ## 0.1.32
 
 - Add reachability-aware branch controls to compact and portrait lineage cards so large trees can be collapsed without hiding descendants that remain connected through another visible branch.

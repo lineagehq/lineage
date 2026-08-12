@@ -258,17 +258,17 @@ try {
     join(root, 'scripts', 'qa-seed-verify.mjs'),
     '--prepare',
     '--base-url', origin,
-    '--project', 'demo-project',
+    '--project', 'swissifier-demo',
     '--json',
   ]);
   assert.equal(rich.ok, true);
   assert.equal(rich.swissifier_media.present, 14);
   assert.equal(rich.snapshot.png_preview_urls, 14);
 
-  const next = runJson(launcher, ['next', '--profile', profileId, '--project', 'demo-project', '--root', rich.root_asset_id, '--json']);
+  const next = runJson(launcher, ['next', '--profile', profileId, '--project', 'swissifier-demo', '--root', rich.root_asset_id, '--json']);
   assert.equal(next.root_asset_id, rich.root_asset_id);
   assert.ok(next.next_asset, 'CLI next did not return an asset for the rich seed');
-  const brief = runJson(launcher, ['brief', '--profile', profileId, '--project', 'demo-project', '--root', rich.root_asset_id, '--json']);
+  const brief = runJson(launcher, ['brief', '--profile', profileId, '--project', 'swissifier-demo', '--root', rich.root_asset_id, '--json']);
   assert.equal(brief.root_asset_id, rich.root_asset_id);
   assert.ok(brief.brief?.title, 'CLI brief did not return a title');
 

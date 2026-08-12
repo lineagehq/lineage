@@ -115,6 +115,9 @@ describe('lineage CLI start options', () => {
     expect(help).not.toContain('--network-metadata');
     expect(help).toContain('lineage social validate --project <project> --item <item-id>');
     expect(help).not.toContain('lineage social schedule');
+    expect(help).toContain('lineage discuss list --project <project> --root <asset-id>');
+    expect(help).toContain('lineage discuss note --project <project> --root <asset-id> --asset <asset-id-or-exact-title> --notes <text> --confirm-write');
+    expect(help).toContain('lineage discuss clear --project <project> --root <asset-id> --confirm-write');
     expect(help).toContain('lineage db info [--db <path>] [--json]');
     expect(help).toContain('lineage runtime doctor [--json]');
     expect(help).toContain('lineage start --profile <id-or-manifest> [--open] [--json]');
@@ -1388,6 +1391,66 @@ describe('lineage CLI handoff commands', () => {
     expect(() => runLineageDataCommand('social', ['variant', 'remove', '--project', defaultProject, '--variant', variantId, '--expected-revision', '1', '--confirm-write', '--json'])).toThrow('revision conflict');
     const removed = runLineageDataCommand('social', ['variant', 'remove', '--project', defaultProject, '--variant', variantId, '--expected-revision', '2', '--confirm-write', '--json']) as { item: { variants: Array<{ active: boolean; current_revision: number; revision: { editorial_state: string } }> } };
     expect(removed.item.variants[0]).toMatchObject({ active: false, current_revision: 3, revision: { editorial_state: 'archived' } });
+  });
+
+  it('marks, notes, lists, unmarks, and clears Discussion set assets from the CLI contract', () => {
+    seedCliDb();
+    runLineageDataCommand('discuss', [
+      'mark', '--project', defaultProject, '--root', fixtureRootAssetId, '--asset', fixtureRootAssetId,
+      '--actor', 'agent:cli', '--confirm-write', '--json',
+    ]);
+    runLineageDataCommand('discuss', [
+      'note', '--project', defaultProject, '--root', fixtureRootAssetId, '--asset', fixtureRootAssetId,
+      '--notes', 'Compare channel sizing', '--confirm-write', '--json',
+    ]);
+    const listed = runLineageDataCommand('discuss', [
+      'list', '--project', defaultProject, '--root', fixtureRootAssetId, '--json',
+    ]) as { marks: Array<{ asset_id: string; notes?: string }> };
+    expect(listed.marks).toEqual([expect.objectContaining({ asset_id: fixtureRootAssetId, notes: 'Compare channel sizing' })]);
+    expect(() => runLineageDataCommand('discuss', [
+      'note', '--project', defaultProject, '--root', fixtureRootAssetId, '--asset', fixtureRootAssetId,
+      '--confirm-write', '--json',
+    ])).toThrow('lineage discuss note requires --notes');
+    expect((runLineageDataCommand('discuss', [
+      'list', '--project', defaultProject, '--root', fixtureRootAssetId, '--json',
+    ]) as { marks: Array<{ notes?: string }> }).marks[0].notes).toBe('Compare channel sizing');
+
+    runLineageDataCommand('discuss', [
+      'note', '--project', defaultProject, '--root', fixtureRootAssetId, '--asset', fixtureRootAssetId,
+      '--notes', '', '--confirm-write', '--json',
+    ]);
+    expect((runLineageDataCommand('discuss', [
+      'list', '--project', defaultProject, '--root', fixtureRootAssetId, '--json',
+    ]) as { marks: Array<{ notes?: string }> }).marks[0].notes).toBeUndefined();
+    expect((runLineageDataCommand('discuss', [
+      'clear', '--project', defaultProject, '--root', fixtureRootAssetId, '--confirm-write', '--json',
+    ]) as { cleared_count: number }).cleared_count).toBe(1);
+  });
+
+  it('leases only Discussion mutations and delegates the supported write contract', () => {
+    expect(lineageCliRequiresWriterLease('discuss', ['list'])).toBe(false);
+    expect(lineageCliCanDelegateMutation('discuss', ['list'])).toBe(false);
+    for (const subcommand of ['mark', 'note', 'unmark', 'clear']) {
+      expect(lineageCliRequiresWriterLease('discuss', [subcommand])).toBe(true);
+      expect(lineageCliCanDelegateMutation('discuss', [subcommand])).toBe(true);
+    }
+  });
+
+  it('describes Discussion note edits accurately in non-json output', () => {
+    const logs: string[] = [];
+    const originalLog = console.log;
+    console.log = (value?: unknown) => logs.push(String(value));
+    try {
+      printDataResult('discuss', { active: true, mark: { asset_id: 'asset-1', notes: 'Compare sizing' }, ok: true, operation: 'note' }, false);
+      printDataResult('discuss', { active: true, mark: { asset_id: 'asset-1' }, ok: true, operation: 'note' }, false);
+    } finally {
+      console.log = originalLog;
+    }
+
+    expect(logs).toEqual([
+      'Updated discussion note for asset-1',
+      'Cleared discussion note for asset-1',
+    ]);
   });
 
   it('manages lineage task queue commands from the packaged CLI contract', () => {

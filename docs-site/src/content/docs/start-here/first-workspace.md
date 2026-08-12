@@ -11,7 +11,7 @@ the underlying asset history.
 
 ## Step-by-step workflow
 
-1. Open **Lineage** and choose a project.
+1. Open **Lineage** and choose a project to reach its Workspaces page.
 2. Select **New workspace**.
 3. Choose a root asset and give the workspace a recognizable name.
 4. Review the visible descendants and current attempts.

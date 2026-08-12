@@ -108,7 +108,7 @@ export function LineageHandoffPanel({
           </div>
           {rerollTargets.map(target => (
             <div className="lineage-copy-row" key={target.asset_id}>
-              <code>{target.asset_id}{target.reroll_request?.notes ? `: ${target.reroll_request.notes}` : ''}</code>
+              <code>{target.asset_id}{(target.reroll_request?.prompt || target.reroll_request?.notes) ? `: ${target.reroll_request.prompt || target.reroll_request.notes}` : ''}</code>
               <button aria-label={`Copy re-roll target ${target.asset_id}`} onClick={() => void copy(target.asset_id, 're-roll target')}>Copy target</button>
             </div>
           ))}
@@ -145,10 +145,10 @@ export function LineageHandoffPanel({
 function rerollHandoffPacket(rerollCommand: string, targets: LineageNode[]): string {
   return [
     rerollCommand,
-    'For each pending target, ask for or use a target-specific repair prompt.',
+    'Use the exact saved target-specific prompt for each pending target.',
     'Run reroll plan for one target at a time, generate one file under .asset-scratch, then run reroll import.',
     'Do not use link-child for re-roll outputs.',
-    ...targets.map(target => `Target ${target.asset_id}: ${target.title}${target.reroll_request?.notes ? ` (${target.reroll_request.notes})` : ''}`),
+    ...targets.map(target => `Target ${target.asset_id}: ${target.title}${(target.reroll_request?.prompt || target.reroll_request?.notes) ? ` (${target.reroll_request.prompt || target.reroll_request.notes})` : ''}`),
   ].join('\n');
 }
 

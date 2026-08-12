@@ -1,5 +1,5 @@
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createS3StorageAdapter } from './adapters/storage';
@@ -87,6 +87,40 @@ export function cleanProject(project = defaultProject): string {
 
 export function catalogPath(project = defaultProject): string {
   return join(repoRoot, cleanProject(project), 'assets', 'catalog.json');
+}
+
+export function assertProjectCatalogPathSafe(project: string): string {
+  const safeProject = cleanProject(project);
+  const root = realpathSync(repoRoot);
+  let candidate = repoRoot;
+  for (const segment of [safeProject, 'assets', 'catalog.json']) {
+    candidate = join(candidate, segment);
+    try {
+      if (lstatSync(candidate).isSymbolicLink()) {
+        throw new LineageAssetError(`Refusing symlinked project catalog path: ${candidate}`, 409);
+      }
+      const resolved = realpathSync(candidate);
+      const fromRoot = relative(root, resolved);
+      if (fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
+        throw new LineageAssetError(`Project catalog must remain inside the active asset root: ${candidate}`, 409);
+      }
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') continue;
+      throw error;
+    }
+  }
+  return catalogPath(safeProject);
+}
+
+export function projectCatalogDefinitionExists(project: string): boolean {
+  return existsSync(catalogPath(project));
+}
+
+export function removeProjectCatalogDefinition(project: string): { path: string; removed: boolean } {
+  const path = assertProjectCatalogPathSafe(project);
+  if (!existsSync(path)) return { path, removed: false };
+  unlinkSync(path);
+  return { path, removed: true };
 }
 
 function fixtureCatalogPath(project = defaultProject): string {

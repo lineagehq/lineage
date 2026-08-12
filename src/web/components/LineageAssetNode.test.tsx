@@ -71,7 +71,8 @@ describe('AssetNode', () => {
     expect(node.classList.contains('lineage-zoom-medium')).toBe(true);
     expect(node.querySelector('.lineage-node-portrait-footer strong')?.textContent).toBe('Swissifier node');
     expect(node.querySelector('.lineage-node-portrait-state')?.textContent).toContain('root');
-    expect(node.querySelector('.lineage-node-portrait-state')?.textContent).toContain('selected');
+    expect(node.querySelector('.lineage-node-portrait-state')?.textContent).not.toContain('selected');
+    expect(node.querySelector('.lineage-state-chips .branch')?.textContent).toContain('B');
     expect(node.querySelector('.lineage-node-portrait-state')?.textContent).toContain('v3');
     expect(node.querySelector('.lineage-badges')).toBeNull();
     expect(node.textContent).not.toContain('local-node');
@@ -220,19 +221,21 @@ describe('AssetNode', () => {
     expect(onPreviewDismiss).toHaveBeenCalledTimes(1);
   });
 
-  it('runs Branch, Re-roll, Social, and Details from focus-scoped shortcuts', () => {
+  it('runs Branch, Re-roll, Flag, Social, and Details from focus-scoped shortcuts', () => {
     const onOpenDetail = vi.fn();
     const onOpenHistory = vi.fn();
     const onPreviewDismiss = vi.fn();
     const onToggleBranch = vi.fn();
     const onToggleReroll = vi.fn();
+    const onToggleDiscussion = vi.fn();
     const onToggleSocial = vi.fn();
-    renderNode({ attempt_count: 3, onOpenDetail, onOpenHistory, onPreviewDismiss, onToggleBranch, onToggleReroll, onToggleSocial });
+    renderNode({ attempt_count: 3, onOpenDetail, onOpenHistory, onPreviewDismiss, onToggleBranch, onToggleReroll, onToggleDiscussion, onToggleSocial });
     const node = container!.querySelector<HTMLElement>('.lineage-node')!;
 
     act(() => node.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'b' })));
     act(() => node.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'R' })));
     act(() => node.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 's' })));
+    act(() => node.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'f' })));
     act(() => node.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'd' })));
     act(() => node.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, ctrlKey: true, key: 'b' })));
     act(() => node.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, metaKey: true, key: 'd' })));
@@ -243,6 +246,8 @@ describe('AssetNode', () => {
     expect(onToggleReroll).toHaveBeenCalledWith(expect.objectContaining({ asset_id: 'local-node' }));
     expect(onToggleSocial).toHaveBeenCalledTimes(1);
     expect(onToggleSocial).toHaveBeenCalledWith(expect.objectContaining({ asset_id: 'local-node' }));
+    expect(onToggleDiscussion).toHaveBeenCalledTimes(1);
+    expect(onToggleDiscussion).toHaveBeenCalledWith(expect.objectContaining({ asset_id: 'local-node' }));
     expect(onPreviewDismiss).toHaveBeenCalledTimes(1);
     expect(onOpenDetail).toHaveBeenCalledTimes(1);
     expect(onOpenDetail).toHaveBeenCalledWith('local-node');
@@ -274,7 +279,7 @@ describe('AssetNode', () => {
     dialog.remove();
   });
 
-  it('shows a persistent Social badge for an active mark', () => {
+  it('shows a persistent Social state chip for an active mark', () => {
     renderNode({
       social_mark: {
         active: true,
@@ -288,7 +293,18 @@ describe('AssetNode', () => {
       },
     });
 
-    expect(container!.querySelector('.lineage-badges .social')?.textContent).toBe('social');
+    expect(container!.querySelector('.lineage-state-chips .social')?.textContent).toContain('S');
+    expect(container!.querySelector('.lineage-state-chips .social')?.getAttribute('title')).toBe('Marked for Social');
+  });
+
+  it('shows a persistent labeled discussion Flag chip and shortcut', () => {
+    renderNode({
+      discussion_mark: { active: true, asset_id: 'local-node', id: 'discussion-1', marked_at: 'now', marked_by: 'human', project_id: 'demo-project', root_asset_id: 'local-root', updated_at: 'now' },
+    });
+    expect(container!.querySelector('.lineage-state-chips .flag')?.textContent).toContain('F');
+    expect(container!.querySelector('.lineage-state-chips .flag')?.getAttribute('title')).toBe('Flagged for discussion');
+    expect(container!.querySelector('.lineage-node')?.getAttribute('aria-label')).toContain('Active states: Flagged for discussion');
+    expect(container!.querySelector('.lineage-node')?.getAttribute('aria-keyshortcuts')).toBe('B R F S D');
   });
 
   it('renders compact badges for pending and locked lineage tasks', () => {
@@ -381,6 +397,22 @@ describe('AssetNode', () => {
 
     expect(container!.querySelector('.next-output-target')?.textContent).toBe('next unresolved');
     expect(container!.querySelector('.output-target')).toBeNull();
+  });
+
+  it('keeps exact branch and re-roll prompts visible on the node', () => {
+    renderNode({
+      branch_prompt: 'Restyle with a strict Swiss grid.',
+      reroll_request: {
+        id: 'reroll-1', project_id: 'demo-project', root_asset_id: 'local-node', node_asset_id: 'local-node',
+        status: 'pending', requested_by: 'human', prompt: 'Repair the headline only.', created_at: '2026-07-30T00:00:00.000Z',
+      },
+      user_selected: true,
+    });
+
+    const prompts = container!.querySelectorAll<HTMLElement>('.lineage-node-prompts span');
+    expect(prompts).toHaveLength(2);
+    expect(prompts[0].title).toBe('Branch prompt: Restyle with a strict Swiss grid.');
+    expect(prompts[1].title).toBe('Re-roll prompt: Repair the headline only.');
   });
 });
 

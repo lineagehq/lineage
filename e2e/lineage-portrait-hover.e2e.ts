@@ -1,6 +1,6 @@
 import { expect, test } from 'playwright/test';
 
-const project = 'demo-project';
+const project = 'swissifier-demo';
 
 test('toggles and remembers hover previews for portrait cards', async ({ page, request }) => {
   const seed = await request.post('/api/lineage-workspaces/demo/swissifier/seed', {
@@ -8,10 +8,12 @@ test('toggles and remembers hover previews for portrait cards', async ({ page, r
   });
   expect(seed.ok()).toBe(true);
   const seeded = await seed.json() as { workspace?: { id: string } };
+  const workspaceId = seeded.workspace?.id;
+  if (!workspaceId) throw new Error('Swissifier seed did not return an exact workspace ID');
 
   try {
-    await page.goto('/?project=demo-project&lineageCanvas=compact');
-    await expect(page.getByRole('region', { name: 'Canvas workspace tools' }).locator('.lineage-workspace-trigger strong')).toHaveText('Swissifier rich demo', { timeout: 20_000 });
+    await page.goto(`/projects/${project}/workspaces/${encodeURIComponent(workspaceId)}?lineageCanvas=compact`);
+    await expect(page.locator('.lineage-workspace-title strong')).toHaveText('Swissifier rich demo', { timeout: 20_000 });
     await openCanvasSettings(page);
     await page.getByRole('radio', { name: 'Portrait cards' }).check();
     const rootNode = page.locator('.lineage-node.root-node');
@@ -34,7 +36,7 @@ test('toggles and remembers hover previews for portrait cards', async ({ page, r
     await expect(preview).toHaveCount(0);
 
     await page.reload();
-    await expect(page.getByRole('region', { name: 'Canvas workspace tools' }).locator('.lineage-workspace-trigger strong')).toHaveText('Swissifier rich demo', { timeout: 20_000 });
+    await expect(page.locator('.lineage-workspace-title strong')).toHaveText('Swissifier rich demo', { timeout: 20_000 });
     await openCanvasSettings(page);
     await expect(page.getByRole('radio', { name: 'Portrait cards' })).toBeChecked();
     await expect(page.getByRole('switch', { name: 'Canvas hover previews' })).toHaveAttribute('aria-checked', 'false');
@@ -50,11 +52,10 @@ test('toggles and remembers hover previews for portrait cards', async ({ page, r
     await page.getByRole('radio', { name: 'Bold edges' }).check();
     await expect(page.getByRole('status')).toContainText('Edge weight changed for this session');
   } finally {
-    if (seeded.workspace?.id) {
-      await request.post(`/api/lineage-workspaces/${encodeURIComponent(seeded.workspace.id)}/archive`, {
-        data: { project, confirmWrite: true },
-      });
-    }
+    const restored = await request.post('/api/lineage-workspaces/demo/swissifier/seed', {
+      data: { activate: false, confirmWrite: true, project },
+    });
+    expect(restored.ok(), await restored.text()).toBe(true);
   }
 });
 

@@ -46,11 +46,14 @@ test('renders a 1080x1350 portrait detail preview without clipping', async ({ pa
     },
   });
   expect(workspace.ok()).toBe(true);
+  const created = await workspace.json() as { workspace?: { id: string } };
+  workspaceId = created.workspace?.id || null;
+  if (!workspaceId) throw new Error('Workspace creation did not return an exact workspace ID');
 
   await page.setViewportSize({ width: 1280, height: 1000 });
-  await page.goto(`/?project=${project}`);
+  await page.goto(`/projects/${project}/workspaces/${encodeURIComponent(workspaceId)}`);
 
-  await expect(page.getByRole('region', { name: 'Canvas workspace tools' }).locator('.lineage-workspace-trigger strong')).toHaveText('Portrait 1080x1350 regression', { timeout: 20_000 });
+  await expect(page.locator('.lineage-workspace-title strong')).toHaveText('Portrait 1080x1350 regression', { timeout: 20_000 });
   const node = page.locator('.lineage-node', { hasText: 'portrait 1080x1350' });
   await expect(node).toBeVisible();
 

@@ -13,8 +13,10 @@ understand where it came from.
 
 1. Open or create a workspace around the intended root.
 2. Inspect the current asset and its latest approved attempt.
-3. Select the parent or parents for the next variation.
-4. Create a generation handoff with a clear prompt and output count.
+3. Choose **Branch** on each intended parent and enter its exact variation
+   prompt. Use **Variation queue** to review or edit every queued instruction.
+4. Create a generation handoff with the queued prompts and output count. If an
+   item has no prompt, ask the user what should change before generating.
 5. Import outputs with explicit parent mappings.
 6. Add a short edge summary that explains the visual change.
 7. Review the children and select the next useful direction.

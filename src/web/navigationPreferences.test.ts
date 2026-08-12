@@ -3,7 +3,11 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   CONTEXT_PANEL_OPEN_KEY,
+  PROJECTS_PRESENTATION_KEY,
+  WORKSPACES_PRESENTATION_KEY,
+  readCollectionPresentation,
   readContextPanelOpen,
+  writeCollectionPresentation,
   writeContextPanelOpen,
 } from './navigationPreferences';
 
@@ -29,5 +33,20 @@ describe('navigation preferences', () => {
 
     expect(readContextPanelOpen(unavailable)).toBe(true);
     expect(() => writeContextPanelOpen(false, unavailable)).not.toThrow();
+    expect(readCollectionPresentation(PROJECTS_PRESENTATION_KEY, unavailable)).toBe('list');
+    expect(() => writeCollectionPresentation(WORKSPACES_PRESENTATION_KEY, 'list', unavailable)).not.toThrow();
+  });
+
+  it('persists one presentation preference for each organization level', () => {
+    writeCollectionPresentation(PROJECTS_PRESENTATION_KEY, 'list');
+    writeCollectionPresentation(WORKSPACES_PRESENTATION_KEY, 'cards');
+
+    expect(readCollectionPresentation(PROJECTS_PRESENTATION_KEY)).toBe('list');
+    expect(readCollectionPresentation(WORKSPACES_PRESENTATION_KEY)).toBe('cards');
+  });
+
+  it('defaults both organization levels to list presentation', () => {
+    expect(readCollectionPresentation(PROJECTS_PRESENTATION_KEY)).toBe('list');
+    expect(readCollectionPresentation(WORKSPACES_PRESENTATION_KEY)).toBe('list');
   });
 });

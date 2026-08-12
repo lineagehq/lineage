@@ -5,7 +5,7 @@ import express from 'express';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { useLineageTestProfile } from '../test/lineageTestProfile';
 import { defaultProject, repoRoot } from './assetCore';
-import { indexLineageAssets, linkLineageAssets, markLineageRerollRequest, updateSelectedAsset } from './assetLineage';
+import { getLineageSnapshot, indexLineageAssets, linkLineageAssets, markLineageRerollRequest, updateSelectedAsset } from './assetLineage';
 import { backfillLineageTasks, lineageDb } from './assetLineageDb';
 import { inspectAgentClaim, listAgentClaims } from './agentClaims';
 import {
@@ -179,10 +179,89 @@ describe('asset lineage tasks', () => {
     expect(taskEventTypes(created.task.id)).toEqual(['created', 'claimed', 'comment_added', 'started']);
   });
 
+  it('keeps promptless variation tasks visible but blocks agent execution until a prompt is saved', () => {
+    const files = seedLineage();
+    const created = upsertLineageTask(defaultProject, {
+      createdBy: 'human',
+      instructions: null,
+      rootAssetId: files.rootId,
+      targetAssetId: files.childId,
+      taskType: 'iterate',
+    });
+
+    expect(created.task).toMatchObject({ prompt_status: 'needs_prompt', status: 'pending' });
+    expect(() => claimLineageTask(defaultProject, {
+      agentName: 'Task worker',
+      taskId: created.task.id,
+    })).toThrow('needs a variation prompt before it can be claimed');
+    expect(listAgentClaims(defaultProject).claims.filter(claim =>
+      claim.scope_type === 'lineage_task' && claim.target_id === created.task.id
+    )).toHaveLength(0);
+
+    const prompted = updateLineageTaskInstructions(defaultProject, {
+      instructions: 'Create a quieter editorial variation.',
+      taskId: created.task.id,
+    });
+    expect(prompted.task.prompt_status).toBe('ready');
+
+    const claimed = claimLineageTask(defaultProject, {
+      agentName: 'Task worker',
+      taskId: created.task.id,
+    });
+    const database = lineageDb();
+    try {
+      database.prepare('update lineage_tasks set instructions = null where id = ?').run(created.task.id);
+    } finally {
+      database.close();
+    }
+    expect(() => startLineageTask(defaultProject, {
+      claimToken: claimed.claim_token,
+      taskId: created.task.id,
+    })).toThrow('needs a variation prompt before it can be started');
+  });
+
+  it('keeps Canvas branch and re-roll prompts synchronized with task instruction edits', () => {
+    const files = seedLineage();
+    updateSelectedAsset(defaultProject, {
+      assetId: files.childId,
+      confirmWrite: true,
+      rootAssetId: files.rootId,
+    });
+    markLineageRerollRequest(defaultProject, {
+      confirmWrite: true,
+      nodeAssetId: files.childId,
+      notes: '',
+      requestedBy: 'human',
+      rootAssetId: files.rootId,
+    });
+    const tasks = listLineageTasks(defaultProject, files.rootId).tasks;
+    const iterateTask = tasks.find(task => task.task_type === 'iterate')!;
+    const rerollTask = tasks.find(task => task.task_type === 'reroll')!;
+
+    updateLineageTaskInstructions(defaultProject, {
+      instructions: 'Use a tighter editorial grid.',
+      taskId: iterateTask.id,
+    });
+    updateLineageTaskInstructions(defaultProject, {
+      instructions: 'Keep the layout and repair the headline.',
+      taskId: rerollTask.id,
+    });
+
+    const snapshot = getLineageSnapshot(defaultProject, files.rootId);
+    const child = snapshot.nodes.find(node => node.asset_id === files.childId);
+    expect(child?.branch_prompt).toBe('Use a tighter editorial grid.');
+    expect(child?.reroll_request).toMatchObject({
+      prompt: 'Keep the layout and repair the headline.',
+      prompt_status: 'ready',
+    });
+    expect(snapshot.tasks?.every(task => task.prompt_status === 'ready')).toBe(true);
+  });
+
   it('does not create a second claim or event when claiming an already claimed task', () => {
     const files = seedLineage();
     const created = upsertLineageTask(defaultProject, {
       createdBy: 'human',
+      instructions: 'Keep this task claimed.',
       rootAssetId: files.rootId,
       targetAssetId: files.childId,
       taskType: 'iterate',
@@ -382,6 +461,7 @@ describe('asset lineage tasks', () => {
     const files = seedLineage();
     const created = upsertLineageTask(defaultProject, {
       createdBy: 'human',
+      instructions: 'Preview cancelling this active task.',
       rootAssetId: files.rootId,
       targetAssetId: files.childId,
       taskType: 'iterate',
@@ -473,6 +553,7 @@ describe('asset lineage tasks', () => {
     const files = seedLineage();
     const created = upsertLineageTask(defaultProject, {
       createdBy: 'human',
+      instructions: 'Keep this route task locked.',
       rootAssetId: files.rootId,
       targetAssetId: files.childId,
       taskType: 'iterate',
@@ -508,6 +589,7 @@ describe('asset lineage tasks', () => {
     const files = seedLineage();
     const created = upsertLineageTask(defaultProject, {
       createdBy: 'human',
+      instructions: 'Run this route task.',
       rootAssetId: files.rootId,
       targetAssetId: files.childId,
       taskType: 'iterate',
@@ -588,6 +670,7 @@ describe('asset lineage tasks', () => {
     });
     const active = upsertLineageTask(defaultProject, {
       createdBy: 'human',
+      instructions: 'Keep this route task active.',
       rootAssetId: files.rootId,
       targetAssetId: files.childId,
       taskType: 'iterate',
@@ -657,6 +740,7 @@ describe('asset lineage tasks', () => {
     const files = seedLineage();
     const created = upsertLineageTask(defaultProject, {
       createdBy: 'human',
+      instructions: 'Keep this task active until overridden.',
       rootAssetId: files.rootId,
       targetAssetId: files.childId,
       taskType: 'iterate',
@@ -699,6 +783,7 @@ describe('asset lineage tasks', () => {
     });
     const active = upsertLineageTask(defaultProject, {
       createdBy: 'human',
+      instructions: 'Keep this compatibility task claimed.',
       rootAssetId: files.rootId,
       targetAssetId: files.childId,
       taskType: 'iterate',

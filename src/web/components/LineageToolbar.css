@@ -15,11 +15,72 @@
   width: 100%;
 }
 
-.lineage-toolbar-context {
-  margin: 0;
+.lineage-workspace-context {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  border: 1px solid #bad6dc;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #f9fcfc 0%, #eaf6f7 100%);
+  box-shadow: inset 3px 0 #13808b, 0 5px 16px rgba(21, 62, 72, 0.07);
+  padding: 11px 10px 11px 12px;
+}
+
+.lineage-workspace-context-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid #bedbe0;
+  border-radius: 10px;
+  background: #fff;
+  color: #08717c;
+}
+
+.lineage-workspace-context-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.lineage-workspace-context-copy > span:first-child {
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 800;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.lineage-workspace-context strong {
+  overflow: hidden;
+  color: #183f49;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lineage-workspace-context-state {
+  align-self: start;
+  border: 1px solid #bdd9d4;
+  border-radius: 999px;
+  background: #ecf8f4;
+  color: #176b5b;
+  padding: 3px 7px;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.lineage-toolbar-context {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .lineage-replay-launch {
@@ -148,3 +209,6 @@
     max-height: min(52vh, 460px);
   }
 }
+.lineage-variation-queue-launch { align-items: center; display: flex; gap: 7px; }
+.lineage-toolbar-count { display: inline-grid; min-width: 21px; height: 21px; place-items: center; border-radius: 999px; background: #dff2f3; color: #08747d; font-size: 10px; font-weight: 900; }
+.lineage-variation-queue-launch kbd { margin-left: auto; border: 1px solid #b9ccd2; border-radius: 5px; background: rgba(255,255,255,.72); color: #5a7079; padding: 2px 5px; font: inherit; font-size: 9px; }

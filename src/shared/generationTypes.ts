@@ -43,6 +43,7 @@ export interface GenerationHandoffPacket {
   schema_version: 'lineage.generation_handoff.v1' | 'lineage.generation_handoff.v2' | 'lineage.generation_handoff.v3';
   provider: GenerationProvider; project: string; job_id: string; prompt: string;
   expected_output_count: number; per_base_count?: number;
+  source_prompts?: Array<{ asset_id: string; prompt: string }>;
   lineage: {
     root_asset_id: string; parent_asset_id: string; selection_strategy: string;
     parent_title: string; parent_local_path?: string; parent_s3_key?: string;

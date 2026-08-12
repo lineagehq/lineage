@@ -1,27 +1,36 @@
 import { expect, test, type Page } from 'playwright/test';
 
-const project = 'demo-project';
+const project = 'swissifier-demo';
 const richTitle = 'Swissifier rich demo';
-const basicTitle = 'Demo: Content iteration tree';
+const isolationTitle = 'Replay isolation workspace';
 const rootId = 'local-5748fb8ba6df';
 const posterId = 'local-befe299c503d';
 const rootPosterEdgeId = `${project}:${rootId}:derived_from:${posterId}`;
 
 test('replays and scrubs a stable branching lineage, isolates refreshes, and remains accessible', async ({ page, request }) => {
-  const basicSeed = await request.post('/api/lineage-workspaces/demo/seed', {
-    data: { activate: false, confirmWrite: true, project },
-  });
-  expect(basicSeed.ok()).toBe(true);
-  const basic = await basicSeed.json() as { workspace?: { id: string } };
   const richSeed = await request.post('/api/lineage-workspaces/demo/swissifier/seed', {
     data: { activate: true, confirmWrite: true, project },
   });
   expect(richSeed.ok()).toBe(true);
   const rich = await richSeed.json() as { workspace?: { id: string } };
+  const richWorkspaceId = rich.workspace?.id;
+  if (!richWorkspaceId) throw new Error('Swissifier seed did not return an exact workspace ID');
+  const isolationSeed = await request.post('/api/lineage-workspaces', {
+    data: {
+      activate: false,
+      confirmWrite: true,
+      project,
+      rootAssetId: posterId,
+      title: isolationTitle,
+    },
+  });
+  expect(isolationSeed.ok(), await isolationSeed.text()).toBe(true);
+  const isolation = await isolationSeed.json() as { workspace?: { id: string } };
+  if (!isolation.workspace?.id) throw new Error('Replay isolation seed did not return an exact workspace ID');
 
   try {
-    await page.goto('/');
-    await expect(page.getByRole('region', { name: 'Canvas workspace tools' }).locator('.lineage-workspace-trigger strong')).toHaveText(richTitle, { timeout: 20_000 });
+    await page.goto(`/projects/${project}/workspaces/${encodeURIComponent(richWorkspaceId)}`);
+    await expect(page.locator('.lineage-workspace-title strong')).toHaveText(richTitle, { timeout: 20_000 });
     await expect(page.locator('.react-flow__node')).toHaveCount(14);
     await expect(page.locator('.react-flow__edge')).toHaveCount(13);
 
@@ -132,17 +141,21 @@ test('replays and scrubs a stable branching lineage, isolates refreshes, and rem
     ))).toBe('1ms');
     await expect(controls.locator('output')).toHaveText('Stage 14 of 14', { timeout: 5_000 });
 
-    await page.getByRole('region', { name: 'Canvas workspace tools' }).locator('.lineage-workspace-trigger').click();
-    await page.getByRole('option', { name: new RegExp(basicTitle) }).click();
-    await expect(page.getByRole('region', { name: 'Canvas workspace tools' }).locator('.lineage-workspace-trigger strong')).toHaveText(basicTitle);
+    await page.locator('.lineage-workspace-exit').click();
+    const isolationWorkspace = page.locator('.organization-item').filter({ hasText: isolationTitle });
+    await isolationWorkspace.getByRole('button', { name: 'Open Canvas' }).click();
+    await expect(page.locator('.lineage-workspace-title strong')).toHaveText(isolationTitle);
     await expect(controls).toHaveCount(0);
   } finally {
-    for (const workspaceId of [rich.workspace?.id, basic.workspace?.id]) {
-      if (!workspaceId) continue;
-      await request.post(`/api/lineage-workspaces/${encodeURIComponent(workspaceId)}/archive`, {
+    if (isolation.workspace?.id) {
+      await request.post(`/api/lineage-workspaces/${encodeURIComponent(isolation.workspace.id)}/archive`, {
         data: { confirmWrite: true, project },
       });
     }
+    const restored = await request.post('/api/lineage-workspaces/demo/swissifier/seed', {
+      data: { activate: false, confirmWrite: true, project },
+    });
+    expect(restored.ok(), await restored.text()).toBe(true);
   }
 });
 

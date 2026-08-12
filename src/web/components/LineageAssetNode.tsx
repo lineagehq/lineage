@@ -20,6 +20,7 @@ type AssetNodeData = LineageNode & {
   collapseInteractive?: boolean;
   focusRole: LineageFocusRole;
   hoverPreviewsEnabled?: boolean;
+  variationQueueState?: 'ancestor' | 'primary' | 'queued';
   onOpenDetail?: (assetId: string) => void;
   onOpenHistory?: (assetId: string) => void;
   onPreviewChange?: (source: LineagePreviewSource, assetId: string, position: HoverPreviewPosition | null) => void;
@@ -27,6 +28,7 @@ type AssetNodeData = LineageNode & {
   onToggleCollapse?: (assetId: string) => void;
   onToggleBranch?: (node: LineageNode) => void;
   onToggleReroll?: (node: LineageNode) => void;
+  onToggleDiscussion?: (node: LineageNode) => void;
   onToggleSocial?: (node: LineageNode) => void;
   root: boolean;
   replayInteractive?: boolean;
@@ -48,15 +50,50 @@ type AssetNodeData = LineageNode & {
 } & Record<string, unknown>;
 export type AssetFlowNode = Node<AssetNodeData, 'assetNode'>;
 
+function lineageActiveStateLabels(node: LineageNode): string[] {
+  return [
+    node.user_selected ? 'Branch queued' : null,
+    node.reroll_request?.status === 'pending' ? 'Re-roll queued' : null,
+    node.social_mark?.active ? 'Marked for Social' : null,
+    node.discussion_mark?.active ? 'Flagged for discussion' : null,
+  ].filter((label): label is string => Boolean(label));
+}
+
+export function LineageStateChips({ className = '', node }: { className?: string; node: LineageNode }) {
+  const states = [
+    node.user_selected ? { className: 'branch', key: 'B', label: 'Branch queued' } : null,
+    node.reroll_request?.status === 'pending' ? { className: 'reroll', key: 'R', label: 'Re-roll queued' } : null,
+    node.social_mark?.active ? { className: 'social', key: 'S', label: 'Marked for Social' } : null,
+    node.discussion_mark?.active ? { className: 'flag', key: 'F', label: 'Flagged for discussion' } : null,
+  ].filter((state): state is { className: string; key: string; label: string } => Boolean(state));
+  if (states.length === 0) return null;
+  return (
+    <ul aria-label="Active action states" className={`lineage-state-chips ${className}`.trim()}>
+      {states.map(state => (
+        <li className={state.className} key={state.key} title={state.label}>
+          <span aria-hidden="true">{state.key}</span><span className="sr-only">{state.label}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function AssetNode({ data }: NodeProps<AssetFlowNode>) {
   const storage = storageStateFor({ hasLocal: Boolean(data.local_path), hasS3: Boolean(data.s3_key) });
   const taskBadges = lineageTaskBadges(data.lineage_tasks);
   const replayState = data.replayState;
+  const activeStateLabels = lineageActiveStateLabels(data);
   const replayInteractive = data.replayInteractive !== false;
   const portrait = data.canvasPresentation === 'portrait';
   const collapseInteractive = data.collapseInteractive !== false;
   const semanticZoomTier = data.semanticZoomTier || 'near';
   const hasWork = taskBadges.length > 0 || (data.reroll_request?.status === 'pending' && !data.lineage_tasks?.reroll);
+  const branchQueued = data.user_selected;
+  const rerollQueued = data.reroll_request?.status === 'pending';
+  const branchPrompt = branchQueued ? data.branch_prompt || data.selection_note : undefined;
+  const rerollPrompt = rerollQueued
+    ? data.reroll_request?.prompt || data.reroll_request?.notes
+    : undefined;
   const openFromNode = () => {
     data.onPreviewDismiss?.();
     if ((data.attempt_count || 1) > 1) data.onOpenHistory?.(data.asset_id);
@@ -79,9 +116,11 @@ export function AssetNode({ data }: NodeProps<AssetFlowNode>) {
       style={branchTransitionStyle}
     >
       <div
-        aria-label={`${data.title} ${((data.attempt_count || 1) > 1) ? 'attempt history' : 'details'}`}
+        aria-label={`${data.title} ${((data.attempt_count || 1) > 1) ? 'attempt history' : 'details'}${activeStateLabels.length ? `. Active states: ${activeStateLabels.join(', ')}` : ''}`}
         aria-hidden={replayState === 'future' ? true : undefined}
-        className={`lineage-node lineage-node-${portrait ? 'portrait' : 'compact'} lineage-zoom-${semanticZoomTier} lineage-review-${data.review_state} ${hasWork ? 'lineage-has-work' : ''} ${data.root ? 'root-node' : ''} ${data.active ? 'active' : ''} ${data.user_selected ? 'selected' : ''} ${data.is_latest ? 'latest' : ''} focus-${data.focusRole} ${replayState ? `lineage-node-replay-${replayState}` : ''}`}
+        aria-keyshortcuts="B R F S D"
+        className={`lineage-node lineage-node-${portrait ? 'portrait' : 'compact'} lineage-zoom-${semanticZoomTier} lineage-review-${data.review_state} ${hasWork ? 'lineage-has-work' : ''} ${data.root ? 'root-node' : ''} ${data.active ? 'active' : ''} ${data.user_selected ? 'selected' : ''} ${data.is_latest ? 'latest' : ''} ${data.variationQueueState ? `variation-${data.variationQueueState}` : ''} focus-${data.focusRole} ${replayState ? `lineage-node-replay-${replayState}` : ''}`}
+        data-asset-id={data.asset_id}
         data-focus-role={data.focusRole}
         data-has-work={hasWork ? 'true' : undefined}
         data-lineage-root={data.root ? 'true' : undefined}
@@ -112,6 +151,12 @@ export function AssetNode({ data }: NodeProps<AssetFlowNode>) {
             data.onToggleSocial?.(data);
             return;
           }
+          if (!event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && key === 'f') {
+            event.preventDefault();
+            event.stopPropagation();
+            data.onToggleDiscussion?.(data);
+            return;
+          }
           if (!event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && key === 'd') {
             event.preventDefault();
             event.stopPropagation();
@@ -134,7 +179,7 @@ export function AssetNode({ data }: NodeProps<AssetFlowNode>) {
       >
         <Handle className="lineage-handle" isConnectable={false} position={data.targetPosition} type="target" />
         <Handle className="lineage-handle" isConnectable={false} position={data.sourcePosition} type="source" />
-        <span aria-hidden="true" className="lineage-node-action">Details</span>
+        <LineageStateChips className="lineage-state-chips-node" node={data} />
         {portrait && (
           <div aria-hidden="true" className="lineage-node-overview-markers">
             {hasWork && <span className="work">work</span>}
@@ -156,13 +201,16 @@ export function AssetNode({ data }: NodeProps<AssetFlowNode>) {
             <div aria-label="Asset state" className="lineage-node-portrait-state">
               {data.root && <span className="root">root</span>}
               {data.is_latest && <span className="latest">latest</span>}
-              {data.user_selected && <span className="selected">selected</span>}
               {(data.attempt_count || 1) > 1 && <span className="attempt-stack">v{data.attempt_count}</span>}
               {taskBadges.length > 0 && <span className="lineage-task-badge">work</span>}
-              {data.reroll_request?.status === 'pending' && !data.lineage_tasks?.reroll && <span className="reroll">re-roll</span>}
-              {data.social_mark?.active && <span className="social">social</span>}
             </div>
             <small>{data.review_state.replaceAll('_', ' ')}</small>
+            {(branchQueued || rerollQueued) && (
+              <div className="lineage-node-prompts">
+                {branchQueued && <span className={branchPrompt ? '' : 'missing'} title={branchPrompt ? `Branch prompt: ${branchPrompt}` : 'Branch has no prompt'}><b>Branch</b>{branchPrompt || 'No prompt'}</span>}
+                {rerollQueued && <span className={`reroll ${rerollPrompt ? '' : 'missing'}`} title={rerollPrompt ? `Re-roll prompt: ${rerollPrompt}` : 'Re-roll has no prompt'}><b>Re-roll</b>{rerollPrompt || 'No prompt'}</span>}
+              </div>
+            )}
           </div>
         ) : (
           <>
@@ -173,15 +221,12 @@ export function AssetNode({ data }: NodeProps<AssetFlowNode>) {
               <span>{data.review_state}</span>
               {data.root && <span className="root">root</span>}
               {data.is_latest && <span className="latest">latest</span>}
-              {data.user_selected && <span className="selected">next variation</span>}
               {(data.attempt_count || 1) > 1 && <span className="attempt-stack">v{data.attempt_count}</span>}
               {taskBadges.map(task => (
                 <span className={`lineage-task-badge ${task.task_type} ${task.status === 'pending' ? 'pending' : 'locked'}`} key={task.id}>
                   {task.task_type} {task.status === 'pending' ? 'pending' : 'locked'}
                 </span>
               ))}
-              {data.reroll_request?.status === 'pending' && !data.lineage_tasks?.reroll && <span className="reroll">re-roll</span>}
-              {data.social_mark?.active && <span className="social">social</span>}
               {data.generation_target && (
                 <span
                   className={`output-target ${data.generation_target.locked ? 'locked' : 'unlocked'}`}
@@ -205,6 +250,12 @@ export function AssetNode({ data }: NodeProps<AssetFlowNode>) {
                 </span>
               )}
             </div>
+            {(branchQueued || rerollQueued) && (
+              <div className="lineage-node-prompts">
+                {branchQueued && <span className={branchPrompt ? '' : 'missing'} title={branchPrompt ? `Branch prompt: ${branchPrompt}` : 'Branch has no prompt'}><b>Branch</b>{branchPrompt || 'No prompt'}</span>}
+                {rerollQueued && <span className={`reroll ${rerollPrompt ? '' : 'missing'}`} title={rerollPrompt ? `Re-roll prompt: ${rerollPrompt}` : 'Re-roll has no prompt'}><b>Re-roll</b>{rerollPrompt || 'No prompt'}</span>}
+              </div>
+            )}
             <span aria-hidden="true" className="lineage-node-hint">{data.hoverPreviewsEnabled ? 'Hover to preview' : 'Double-click for details'}</span>
           </>
         )}

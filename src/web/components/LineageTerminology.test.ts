@@ -9,7 +9,6 @@ const uiFiles = [
   'src/web/components/LineageHandoffPanel.tsx',
   'src/web/components/LineageAssetNode.tsx',
   'src/web/components/LineageToolbar.tsx',
-  'src/web/components/LineageWorkspacePicker.tsx',
   'src/web/components/LineageView.css',
   'src/web/components/LedgerView.tsx',
 ];

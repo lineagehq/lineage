@@ -5,6 +5,7 @@ import { storageStateFor } from '../assetUi';
 import { useLineageCli } from '../lineageRuntimeCommand';
 import { CandidateMeta } from './LineageCandidateMeta';
 import { LineageHandoffPanel } from './LineageHandoffPanel';
+import type { VariationPromptMode } from './LineageVariationPromptDialog';
 
 interface LineageSidePanelProps {
   activeNode?: LineageNode;
@@ -12,6 +13,7 @@ interface LineageSidePanelProps {
   childAssetId: string;
   clearNextVariation: (assetId?: string) => Promise<void>;
   closePanel: () => void;
+  editVariationPrompt?: (node: LineageNode, mode: VariationPromptMode, branchAction?: 'add' | 'edit' | 'replace') => void;
   latestNodes: LineageNode[];
   linkChild: () => Promise<void>;
   noteDirty: boolean;
@@ -21,9 +23,9 @@ interface LineageSidePanelProps {
   project: string;
   refreshBrief: () => Promise<void>;
   refreshLineage: () => Promise<void>;
-  replaceNextVariation: (node: LineageNode, notes?: string) => void;
+  replaceNextVariation?: (node: LineageNode, notes?: string) => void;
   saveRationale: () => void;
-  selectNextBase: (node: LineageNode, notes?: string) => void;
+  selectNextBase?: (node: LineageNode, notes?: string) => void;
   selectedNode?: LineageNode;
   selectedNodes: LineageNode[];
   selectionFull: boolean;
@@ -31,7 +33,7 @@ interface LineageSidePanelProps {
   setActiveNodeId: Dispatch<SetStateAction<string | null>>;
   setChildAssetId: Dispatch<SetStateAction<string>>;
   setDetailNodeId: Dispatch<SetStateAction<string | null>>;
-  setSelected: () => void;
+  setSelected?: () => void;
   setSelectionNote: Dispatch<SetStateAction<string>>;
   sideOpen: boolean;
   snapshot: LineageSnapshot;
@@ -42,13 +44,31 @@ interface LineageSidePanelProps {
 export function LineageSidePanel(props: LineageSidePanelProps) {
   const cli = useLineageCli();
   const {
-    activeNode, brief, childAssetId, clearNextVariation, closePanel, latestNodes, linkChild, markReview, noteDirty, onSelectedAsset,
-    nextVariationLimit, onToast, project, refreshBrief, saveRationale, selectNextBase, selectedNode, selectedNodes, selectionFull,
-    refreshLineage, replaceNextVariation, selectionNote, setActiveNodeId, setChildAssetId, setDetailNodeId, setSelected, setSelectionNote, sideOpen, snapshot, mode,
+    activeNode, brief, childAssetId, clearNextVariation, closePanel, editVariationPrompt, latestNodes, linkChild, markReview, noteDirty, onSelectedAsset,
+    nextVariationLimit, onToast, project, refreshBrief, saveRationale, selectedNode, selectedNodes, selectionFull,
+    refreshLineage, replaceNextVariation, selectNextBase, selectionNote, setActiveNodeId, setChildAssetId, setDetailNodeId, setSelected, setSelectionNote, sideOpen, snapshot, mode,
   } = props;
+  const editPrompt = editVariationPrompt || ((node: LineageNode, mode: VariationPromptMode, branchAction?: 'add' | 'edit' | 'replace') => {
+    if (mode !== 'branch') return;
+    if (branchAction === 'replace') replaceNextVariation?.(node);
+    else if (node.asset_id === activeNode?.asset_id) setSelected?.();
+    else selectNextBase?.(node);
+  });
   const activeStorage = activeNode ? storageStateFor({ hasLocal: Boolean(activeNode.local_path), hasS3: Boolean(activeNode.s3_key) }) : null;
   const staleSelectedNodes = selectedNodes.filter(node => !node.is_latest);
   const pendingRerollNodes = snapshot.nodes.filter(node => node.reroll_request?.status === 'pending');
+  const branchLimitMessage = `${selectedNodes.length} of ${nextVariationLimit} branches queued. Raise the maximum in Canvas settings or remove a branch.`;
+  const toggleBranch = (node: LineageNode) => {
+    if (node.user_selected) {
+      void clearNextVariation(node.asset_id);
+      return;
+    }
+    if (selectionFull) {
+      onToast('error', branchLimitMessage);
+      return;
+    }
+    editPrompt(node, 'branch', 'add');
+  };
   const submitChild = (event: FormEvent) => {
     event.preventDefault();
     void linkChild();
@@ -76,7 +96,7 @@ export function LineageSidePanel(props: LineageSidePanelProps) {
               <div><dt>Next variation</dt><dd>{activeNode.user_selected ? 'yes' : 'no'}</dd></div>
             </dl>
             <div className="lineage-side-actions">
-              <button aria-label={activeNode.user_selected ? `Remove ${activeNode.title} from next variation` : `Use ${activeNode.title} for next variation`} className="primary-lite" disabled={!activeNode.user_selected && selectionFull} onClick={() => activeNode.user_selected ? void clearNextVariation(activeNode.asset_id) : setSelected()}>{activeNode.user_selected ? 'Remove from next variation' : selectionFull ? 'Selection full' : 'Use for next variation'}</button>
+              <button aria-disabled={!activeNode.user_selected && selectionFull || undefined} aria-label={activeNode.user_selected ? `Remove ${activeNode.title} from next variation` : `Use ${activeNode.title} for next variation`} className="primary-lite" onClick={() => toggleBranch(activeNode)} title={!activeNode.user_selected && selectionFull ? branchLimitMessage : undefined}>{activeNode.user_selected ? 'Remove from next variation' : selectionFull ? 'Selection full' : 'Use for next variation'}</button>
               <button aria-label={`Open full detail for ${activeNode.title}`} onClick={() => setDetailNodeId(activeNode.asset_id)}>Open full detail</button>
               <button aria-label={`Approve ${activeNode.title}`} onClick={() => void markReview('approved')}>Approve</button>
               <button aria-label={`Reject ${activeNode.title}`} onClick={() => void markReview('rejected')}>Reject</button>
@@ -119,10 +139,12 @@ export function LineageSidePanel(props: LineageSidePanelProps) {
                 <span>{node.title}</span>
                 <code>{node.asset_id}</code>
                 <CandidateMeta node={node} />
+                <small className={`lineage-saved-prompt ${node.branch_prompt ? '' : 'missing'}`}>{node.branch_prompt ? `“${node.branch_prompt}”` : 'No prompt — your agent will ask'}</small>
               </button>
               {!node.is_latest && <span className="lineage-candidate-warning">Not latest</span>}
               <div className="lineage-candidate-actions">
-                {selectedNodes.length > 1 && <button className="lineage-candidate-action secondary" onClick={() => replaceNextVariation(node)}>Use only this</button>}
+                <button className="lineage-candidate-action secondary" onClick={() => editPrompt(node, 'branch', 'edit')}>Edit prompt</button>
+                {selectedNodes.length > 1 && <button className="lineage-candidate-action secondary" onClick={() => editPrompt(node, 'branch', 'replace')}>Use only this</button>}
                 <button className="lineage-candidate-action remove" onClick={() => void clearNextVariation(node.asset_id)}>Remove</button>
               </div>
             </div>
@@ -151,8 +173,9 @@ export function LineageSidePanel(props: LineageSidePanelProps) {
             <button aria-label={`Inspect re-roll target ${node.title}`} className="lineage-candidate-main" onClick={() => { setActiveNodeId(node.asset_id); onSelectedAsset(node.asset_id); }}>
               <span>{node.title}</span>
               <code>{node.asset_id}</code>
-              {node.reroll_request?.notes && <small>{node.reroll_request.notes}</small>}
+              {(node.reroll_request?.prompt || node.reroll_request?.notes) && <small className="lineage-saved-prompt">“{node.reroll_request.prompt || node.reroll_request.notes}”</small>}
             </button>
+            <div className="lineage-candidate-actions"><button className="lineage-candidate-action secondary" onClick={() => editPrompt(node, 'reroll')}>Edit prompt</button></div>
           </div>
         )) : <p className="muted-copy">No pending re-roll targets.</p>}
       </section>
@@ -168,10 +191,10 @@ export function LineageSidePanel(props: LineageSidePanelProps) {
                 <CandidateMeta node={node} />
               </button>
               <div className="lineage-candidate-actions">
-                <button aria-label={node.user_selected ? `Remove ${node.title} from next variation` : `Use ${node.title} for next variation`} className={`lineage-candidate-action ${node.user_selected ? 'remove' : ''}`} disabled={cannotAdd} onClick={() => node.user_selected ? void clearNextVariation(node.asset_id) : selectNextBase(node)}>
+                <button aria-disabled={cannotAdd || undefined} aria-label={node.user_selected ? `Remove ${node.title} from next variation` : `Use ${node.title} for next variation`} className={`lineage-candidate-action ${node.user_selected ? 'remove' : ''}`} onClick={() => toggleBranch(node)} title={cannotAdd ? branchLimitMessage : undefined}>
                   {node.user_selected ? 'Remove' : cannotAdd ? 'Selection full' : 'Use for next variation'}
                 </button>
-                {!node.user_selected && selectedNodes.length > 0 && <button className="lineage-candidate-action secondary" onClick={() => replaceNextVariation(node)}>Replace selection</button>}
+                {!node.user_selected && selectedNodes.length > 0 && <button className="lineage-candidate-action secondary" onClick={() => editPrompt(node, 'branch', 'replace')}>Replace selection</button>}
               </div>
             </div>
           );
@@ -196,15 +219,16 @@ export function LineageSidePanel(props: LineageSidePanelProps) {
             </div>
           )}
           <label className="lineage-note-field">
-            Variation rationale
-            <textarea value={selectionNote} onChange={event => setSelectionNote(event.target.value)} placeholder="Why should the next generation branch from this asset?" />
-            <span className={`lineage-note-status ${noteDirty ? 'dirty' : ''}`}>{activeNode.user_selected ? (noteDirty ? 'Unsaved rationale' : 'Rationale saved for next variation') : 'Rationale saves when this is used for next variation'}</span>
+            Exact branch prompt
+            <textarea value={selectionNote} onChange={event => setSelectionNote(event.target.value)} placeholder="What exactly should your agent change in the next branch?" />
+            <span className={`lineage-note-status ${noteDirty ? 'dirty' : ''}`}>{activeNode.user_selected ? (noteDirty ? 'Unsaved prompt' : selectionNote.trim() ? 'Prompt saved on this node' : 'No prompt — your agent will ask') : 'The prompt saves when this node is queued for a branch'}</span>
           </label>
           <div className="lineage-side-actions">
-            <button aria-label={activeNode.user_selected ? `Remove ${activeNode.title} from next variation` : `Use ${activeNode.title} for next variation`} className="primary-lite" disabled={!activeNode.user_selected && selectionFull} onClick={() => activeNode.user_selected ? void clearNextVariation(activeNode.asset_id) : setSelected()}>{activeNode.user_selected ? 'Remove from next variation' : selectionFull ? 'Selection full' : 'Use for next variation'}</button>
-            {activeNode.user_selected && selectedNodes.length > 1 && <button onClick={() => replaceNextVariation(activeNode, selectionNote)}>Use only this</button>}
-            {!activeNode.user_selected && selectedNodes.length > 0 && <button onClick={() => replaceNextVariation(activeNode, selectionNote)}>Replace selection</button>}
-            <button disabled={!activeNode.user_selected || !noteDirty} onClick={saveRationale}>Save rationale</button>
+            <button aria-disabled={!activeNode.user_selected && selectionFull || undefined} aria-label={activeNode.user_selected ? `Remove ${activeNode.title} from next variation` : `Use ${activeNode.title} for next variation`} className="primary-lite" onClick={() => toggleBranch(activeNode)} title={!activeNode.user_selected && selectionFull ? branchLimitMessage : undefined}>{activeNode.user_selected ? 'Remove from next variation' : selectionFull ? 'Selection full' : 'Queue branch'}</button>
+            {activeNode.user_selected && selectedNodes.length > 1 && <button onClick={() => editPrompt(activeNode, 'branch', 'replace')}>Use only this</button>}
+            {!activeNode.user_selected && selectedNodes.length > 0 && <button onClick={() => editPrompt(activeNode, 'branch', 'replace')}>Replace selection</button>}
+            <button disabled={!activeNode.user_selected || !noteDirty} onClick={saveRationale}>{selectionNote.trim() ? 'Save prompt' : 'Clear prompt'}</button>
+            {activeNode.reroll_request?.status === 'pending' && <button onClick={() => editPrompt(activeNode, 'reroll')}>Edit re-roll prompt</button>}
             <button aria-label={`Open detail for ${activeNode.title}`} onClick={() => setDetailNodeId(activeNode.asset_id)}>Open detail</button>
             <button aria-label={`Approve ${activeNode.title}`} onClick={() => void markReview('approved')}>Approve</button>
             <button aria-label={`Reject ${activeNode.title}`} onClick={() => void markReview('rejected')}>Reject</button>

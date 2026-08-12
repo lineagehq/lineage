@@ -18,6 +18,8 @@ import { managedWriterRequestSchemaVersion, managedWriterRoute, managedWriterTim
 
 const scratchRoot = join(repoRoot, '.asset-scratch', 'vitest-profile-writer-lease');
 const originalEnv = { ...process.env };
+const childProcessStartupTimeoutMs = 30_000;
+const childProcessTestTimeoutMs = 60_000;
 const childSource = `
   const { acquireProfileWriterLease } = await import('./src/server/profileWriterLease.ts');
   const profile = JSON.parse(Buffer.from(process.env.TEST_PROFILE_B64, 'base64').toString('utf8'));
@@ -80,7 +82,7 @@ describe('profile writer lease', () => {
     const stopped = await collectExit(owner);
     expect(stopped.code).toBe(143);
     expect(existsSync(profileWriterLockPath(profile))).toBe(false);
-  });
+  }, childProcessTestTimeoutMs);
 
   it('rejects unauthenticated, wrong-identity, protected-override, and non-allowlisted delegated requests', async () => {
     const port = await availablePort();
@@ -116,7 +118,7 @@ describe('profile writer lease', () => {
 
     owner.kill('SIGTERM');
     await collectExit(owner);
-  });
+  }, childProcessTestTimeoutMs);
 
   it('fails closed without direct fallback when a live service lease has no listener', async () => {
     const port = await availablePort();
@@ -138,7 +140,7 @@ describe('profile writer lease', () => {
     expect(inspectProfileWriterLease(profile)?.pid).toBe(owner.pid);
     owner.kill('SIGKILL');
     await collectExit(owner);
-  });
+  }, childProcessTestTimeoutMs);
 
   it('refuses a second writer in another process while the owner is alive', async () => {
     const profile = testProfile('development-main', 'development');
@@ -153,7 +155,7 @@ describe('profile writer lease', () => {
     expect(inspectProfileWriterLease(profile)?.pid).toBe(owner.pid);
     owner.kill('SIGKILL');
     await collectExit(owner);
-  });
+  }, childProcessTestTimeoutMs);
 
   it('reclaims a lock after an owner crashes, but not while its PID is live', async () => {
     const profile = testProfile('development-main', 'development');
@@ -168,7 +170,7 @@ describe('profile writer lease', () => {
     expect(inspectProfileWriterLease(profile)).toMatchObject({ pid: process.pid, profile_id: profile.profile_id });
     replacement.release();
     expect(existsSync(profileWriterLockPath(profile))).toBe(false);
-  });
+  }, childProcessTestTimeoutMs);
 
   it('refuses automatic recovery when lock metadata is malformed', () => {
     const profile = testProfile('development-main', 'development');
@@ -275,7 +277,7 @@ describe('profile database writer enforcement', () => {
     expect(result.stderr).toContain('Persistent writes require --profile');
     expect(result.stderr).toContain('profile init --profile <id> --confirm-write');
     expect(existsSync(databasePath)).toBe(false);
-  });
+  }, childProcessTestTimeoutMs);
 
   it('keeps an unprofiled service read-only and rejects HTTP mutations before creating a database', async () => {
     const port = await availablePort();
@@ -293,7 +295,7 @@ describe('profile database writer enforcement', () => {
 
     service.kill('SIGTERM');
     expect((await collectExit(service)).code).toBe(143);
-  });
+  }, childProcessTestTimeoutMs);
 });
 
 describe('CLI writer classification', () => {
@@ -494,7 +496,7 @@ function waitForLine(child: ChildProcess, expected: string): Promise<void> {
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
       reject(new Error(`Timed out waiting for child output: ${expected}`));
-    }, 10_000);
+    }, childProcessStartupTimeoutMs);
     child.stdout?.on('data', chunk => {
       if (!String(chunk).includes(expected)) return;
       clearTimeout(timer);

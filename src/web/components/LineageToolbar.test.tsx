@@ -3,8 +3,6 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import type { LineageSnapshot, LineageWorkspace } from '../../shared/types';
 import { LineageToolbar } from './LineageToolbar';
 
@@ -31,39 +29,37 @@ describe('LineageToolbar', () => {
     vi.unstubAllGlobals();
   });
 
-  it('uses the workspace picker as the canvas toolbar anchor without repeating the Lineage title', () => {
+  it('shows static workspace identity without an in-canvas workspace picker', () => {
     renderToolbar();
 
     expect(container!.querySelector('.lineage-title')).toBeNull();
     expect(container!.querySelector('h2')?.textContent).not.toBe('Lineage');
-    expect(container!.querySelector('.lineage-workspace-picker')).not.toBeNull();
-    expect(container!.querySelector('.lineage-workspace-trigger strong')?.textContent).toBe(workspace.title);
+    expect(container!.querySelector('.lineage-workspace-picker')).toBeNull();
+    expect(container!.querySelector(`[aria-label="Current canvas: ${workspace.title}"]`)).not.toBeNull();
+    expect(container!.querySelector('.lineage-workspace-context')?.textContent).toContain('Current canvas');
+    expect(container!.querySelector('.lineage-workspace-context')?.textContent).toContain('Open');
+    expect(container!.querySelector('.lineage-workspace-context strong')?.textContent).toBe(workspace.title);
     expect(container!.querySelector('.lineage-toolbar-context')?.textContent).toContain('7 nodes');
     expect(container!.querySelector('.lineage-toolbar-context')?.textContent).toContain('6 links');
   });
 
-  it('keeps workspace, layout, selection, and output commands visible without an Actions menu', () => {
+  it('keeps canvas-specific selection and output commands visible without workspace management', () => {
     renderToolbar();
 
     expect(container!.querySelector('.lineage-primary-controls')?.textContent).toContain('Replay growth');
-    expect(container!.querySelector('.lineage-primary-controls')?.textContent).toContain('New lineage');
     expect(container!.querySelector('.lineage-primary-controls')?.textContent).toContain('Plan outputs');
-    expect(container!.querySelector('.lineage-primary-controls')?.textContent).toContain('Manage selection');
+    expect(container!.querySelector('.lineage-primary-controls')?.textContent).toContain('Variation queue');
     expect(container!.querySelector('.lineage-primary-controls')?.textContent).toContain('Output target defaults');
+    expect(container!.querySelector('.lineage-primary-controls')?.textContent).not.toContain('New lineage');
     expect([...container!.querySelectorAll('summary')].some(summary => summary.textContent === 'Actions')).toBe(false);
     expect(container!.textContent).not.toContain('Fit graph');
     expect(container!.textContent).not.toContain('Tidy tree');
-    expect([...container!.querySelectorAll('button')].filter(button => button.textContent === 'New lineage')).toHaveLength(1);
   });
 
-  it('keeps New lineage direct and does not duplicate it inside the workspace picker', () => {
+  it('keeps the persistent Discussion collection out of the contextual left column', () => {
     renderToolbar();
-
-    act(() => container!.querySelector<HTMLButtonElement>('.lineage-workspace-trigger')!.click());
-    const workspaceMenu = container!.querySelector('.lineage-workspace-menu')!;
-
-    expect(workspaceMenu.textContent).not.toContain('New lineage');
-    expect([...container!.querySelectorAll('button')].filter(button => button.textContent === 'New lineage')).toHaveLength(1);
+    expect(container!.querySelector('[aria-label="Discussion set"]')).toBeNull();
+    expect(container!.querySelector('.lineage-discussion-set')).toBeNull();
   });
 
   it('opens target planning from the selected branch and keeps defaults in human settings', () => {
@@ -119,32 +115,6 @@ describe('LineageToolbar', () => {
     expect(demo.textContent).toContain('Load rich image demo');
   });
 
-  it('keeps archive in destructive workspace overflow and preserves its callback', () => {
-    const onArchiveWorkspace = vi.fn();
-    renderToolbar({ onArchiveWorkspace });
-
-    const workspaceTrigger = container!.querySelector<HTMLButtonElement>('.lineage-workspace-trigger')!;
-    act(() => workspaceTrigger.click());
-    const archive = [...container!.querySelectorAll<HTMLButtonElement>('button')]
-      .find(button => button.textContent === 'Archive current lineage')!;
-
-    expect(archive).toBeTruthy();
-    expect(archive.classList.contains('lineage-archive-workspace')).toBe(true);
-    expect(archive.disabled).toBe(false);
-    act(() => archive.click());
-    expect(onArchiveWorkspace).toHaveBeenCalledOnce();
-  });
-
-  it('keeps workspace options and destructive overflow inside the contextual panel width', () => {
-    const css = readFileSync(join(process.cwd(), 'src/web/components/LineageWorkspacePicker.css'), 'utf8');
-    const menuRuleStart = css.indexOf('.lineage-workspace-menu {');
-    const menuRule = css.slice(menuRuleStart, css.indexOf('}', menuRuleStart) + 1);
-
-    expect(menuRule).toContain('width: 100%;');
-    expect(menuRule).toContain('max-width: 100%;');
-    expect(menuRule).not.toContain('420px');
-  });
-
   it('preserves maintenance and Demo/QA command callbacks', () => {
     const onRefreshLineage = vi.fn();
     const onRefreshWorkspaces = vi.fn();
@@ -183,37 +153,27 @@ describe('LineageToolbar', () => {
     }
   });
 
-  it('preserves direct workspace, selection, and output callbacks', () => {
-    const onNewLineage = vi.fn();
+  it('preserves direct selection and output callbacks', () => {
     const onOpenGeneration = vi.fn();
     const onOpenOutputDefaults = vi.fn();
-    const onSelectWorkspace = vi.fn();
     const onToggleNextPanel = vi.fn();
     renderToolbar({
-      onNewLineage,
       onOpenGeneration,
       onOpenOutputDefaults,
-      onSelectWorkspace,
       onToggleNextPanel,
       snapshot: { ...snapshot, selected: ['child-1'] },
     });
 
     for (const [label, callback] of [
-      ['New lineage', onNewLineage],
       ['Plan outputs', onOpenGeneration],
       ['Output target defaults', onOpenOutputDefaults],
-      ['Manage selection', onToggleNextPanel],
+      ['Variation queue', onToggleNextPanel],
     ] as const) {
       const button = [...container!.querySelectorAll<HTMLButtonElement>('.lineage-primary-controls button')]
-        .find(candidate => candidate.textContent === label)!;
+        .find(candidate => candidate.textContent?.includes(label))!;
       act(() => button.click());
       expect(callback).toHaveBeenCalledOnce();
     }
-
-    act(() => container!.querySelector<HTMLButtonElement>('.lineage-workspace-trigger')!.click());
-    const option = container!.querySelector<HTMLButtonElement>('.lineage-workspace-options [role="option"]')!;
-    act(() => option.click());
-    expect(onSelectWorkspace).toHaveBeenCalledWith(workspace.id);
   });
 
   it('shows automatic rich-demo indexing progress and disables duplicate index or seed actions', () => {
@@ -235,10 +195,8 @@ function renderToolbar(overrides: Partial<Parameters<typeof LineageToolbar>[0]> 
     closeSignal: 0,
     demoSeedStatus: demoMediaStatus({ present: 10, total: 10 }),
     loading: false,
-    onArchiveWorkspace: vi.fn(),
     onDownloadSwissifierMedia: vi.fn(),
     onIndexLocal: vi.fn(),
-    onNewLineage: vi.fn(),
     onOpenGeneration: vi.fn(),
     onOpenOutputDefaults: vi.fn(),
     onRefreshLineage: vi.fn(),
@@ -248,7 +206,6 @@ function renderToolbar(overrides: Partial<Parameters<typeof LineageToolbar>[0]> 
     onRestoreSwissifierMedia: vi.fn(),
     onSeedDemo: vi.fn(),
     onSeedSwissifierDemo: vi.fn(),
-    onSelectWorkspace: vi.fn(),
     onToggleNextPanel: vi.fn(),
     replayActive: false,
     sideOpen: false,
@@ -257,7 +214,7 @@ function renderToolbar(overrides: Partial<Parameters<typeof LineageToolbar>[0]> 
     workspaceLoading: false,
     workspaceProgress: null,
     workspaceRootAssetId: workspace.root_asset_id,
-    workspaces: [workspace],
+    variationQueueCount: 2,
     ...overrides,
   };
 

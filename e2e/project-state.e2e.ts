@@ -6,6 +6,7 @@ const project = 'bleep-e2e-project';
 const rootAssetId = 'bleep-e2e-root-static';
 const workspaceTitle = 'Bleep e2e workspace';
 const projectDir = join(process.cwd(), project);
+let workspaceId = '';
 
 function writeProjectCatalog() {
   mkdirSync(join(projectDir, 'assets'), { recursive: true });
@@ -54,33 +55,33 @@ test.beforeEach(async ({ request }) => {
     },
   });
   expect(created.ok()).toBe(true);
+  workspaceId = (await created.json()).workspace.id;
 });
 
 test.afterEach(() => {
   rmSync(projectDir, { force: true, recursive: true });
 });
 
-test('honors project URL params and clears stale project lineage state when switching projects', async ({ page }) => {
-  await page.goto(`/?project=${project}`);
+test('honors exact workspace URLs and clears stale lineage state through browser history', async ({ page }) => {
+  await page.goto(`/projects/${project}/workspaces/${encodeURIComponent(workspaceId)}`);
 
-  const projectSelect = page.locator('select').first();
-  const canvasTools = page.getByRole('region', { name: 'Canvas workspace tools' });
-  const workspaceTrigger = canvasTools.locator('.lineage-workspace-trigger');
-  await expect(projectSelect).toHaveValue(project);
-  await expect(workspaceTrigger.locator('strong')).toHaveText(workspaceTitle);
-  await expect(workspaceTrigger.locator('code')).toHaveText(rootAssetId);
+  const workspaceExit = page.locator('.lineage-workspace-exit');
+  await expect(page.locator('.lineage-workspace-title strong')).toHaveText(workspaceTitle);
+  await expect(page).toHaveURL(new RegExp(`/projects/${project}/workspaces/`));
   await expect(page.getByText('Unknown indexed asset')).not.toBeVisible();
   await expect(page.getByText('No workspace selected')).not.toBeVisible();
 
-  await projectSelect.selectOption('demo-project');
-  await expect(page).toHaveURL(/project=demo-project/);
-  await expect(projectSelect).toHaveValue('demo-project');
+  await workspaceExit.click();
+  await expect(page).toHaveURL(`/projects/${project}/workspaces`);
+  await expect(page.getByRole('heading', { name: 'Workspaces' })).toBeVisible();
 
-  await projectSelect.selectOption(project);
-  await expect(page).toHaveURL(new RegExp(`project=${project}`));
-  await expect(projectSelect).toHaveValue(project);
-  await expect(workspaceTrigger.locator('strong')).toHaveText(workspaceTitle);
-  await expect(workspaceTrigger.locator('code')).toHaveText(rootAssetId);
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`/projects/${project}/workspaces/`));
+  await expect(page.locator('.lineage-workspace-title strong')).toHaveText(workspaceTitle);
   await expect(page.getByText('Unknown indexed asset')).not.toBeVisible();
   await expect(page.getByText('No workspace selected')).not.toBeVisible();
+
+  await page.goForward();
+  await expect(page).toHaveURL(`/projects/${project}/workspaces`);
+  await expect(page.getByRole('heading', { name: 'Workspaces' })).toBeVisible();
 });

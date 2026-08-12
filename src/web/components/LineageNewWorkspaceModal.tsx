@@ -69,7 +69,6 @@ export function LineageNewWorkspaceModal({
         body: JSON.stringify(lineageCreateWorkspaceBody(project, selectedAsset, title, notes)),
       });
       onCreated(result.workspace);
-      onClose();
     } catch (error) {
       onToast('error', error instanceof Error ? error.message : String(error));
     } finally {

@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const appSource = readFileSync(join(process.cwd(), 'src/web/App.tsx'), 'utf8');
+const workspaceHookSource = readFileSync(join(process.cwd(), 'src/web/components/useLineageWorkspaces.ts'), 'utf8');
 
 function snippetBetween(start: string, end: string): string {
   const startIndex = appSource.indexOf(start);
@@ -38,5 +39,33 @@ describe('Lineage navigation behavior', () => {
 
     expect(openDetailsSnippet).toContain('setAssetDetailsOpen(true)');
     expect(openDetailsSnippet).not.toContain("setView('assets')");
+  });
+
+  it('uses canonical browser history for Projects, Workspaces, and exact Canvas identity', () => {
+    expect(appSource).toContain('parseProjectWorkspaceLocation(window.location)');
+    expect(appSource).toContain("window.history[options.replace ? 'replaceState' : 'pushState']");
+    expect(appSource).toContain("window.addEventListener('popstate', onPopState)");
+    expect(appSource).toContain("kind: 'canvas', projectId: nextProject, workspaceId: workspace.id");
+    expect(appSource).toContain("navigateForUser({ kind: 'studio', projectId: project, view: nextView })");
+    expect(appSource).toContain("if (next.kind === 'canvas' || next.kind === 'new-workspace') setView('lineage')");
+    expect(appSource).toContain('onCanvasPresentationChange={rememberCurrentCanvasPresentation}');
+    expect(appSource).toContain('navigateForUser(remembered, { search: remembered.search })');
+    expect(appSource).toContain('forgetCanvasReturnDestination(project)');
+    expect(appSource).toContain('workspaceId={workspaceId}');
+    expect(appSource).toContain('onExitWorkspace={() => navigate');
+  });
+
+  it('keeps Canvas tab identity independent from the server-global active workspace', () => {
+    expect(workspaceHookSource).toContain('visibleWorkspaces.find(workspace => workspace.id === workspaceId)');
+    expect(workspaceHookSource).not.toContain('/activate');
+    expect(workspaceHookSource).not.toContain('projectWorkspaceSnapshot?.active_workspace ||');
+    expect(appSource).not.toContain('/activate');
+  });
+
+  it('rejects obsolete workspace refreshes after either route identity changes', () => {
+    expect(workspaceHookSource).toContain('currentWorkspaceIdRef.current = workspaceId');
+    expect(workspaceHookSource).toContain('requestedProject !== currentProjectRef.current');
+    expect(workspaceHookSource).toContain('requestedWorkspaceId !== currentWorkspaceIdRef.current');
+    expect(workspaceHookSource).toContain('generation !== refreshGenerationRef.current');
   });
 });

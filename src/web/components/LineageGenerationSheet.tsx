@@ -11,6 +11,16 @@ import {
 } from './NodeNextOutputTargetsModel';
 import './LineageGenerationSheet.css';
 
+// eslint-disable-next-line react-refresh/only-export-components -- pure prompt projection shared with regression tests
+export function savedVariationPrompt(sources: LineageNode[]): string {
+  const prompts = sources
+    .map(source => ({ assetId: source.asset_id, prompt: (source.branch_prompt || source.selection_note || '').trim() }))
+    .filter(item => Boolean(item.prompt));
+  if (prompts.length === 0) return '';
+  if (prompts.every(item => item.prompt === prompts[0].prompt)) return prompts[0].prompt;
+  return prompts.map(item => `For source ${item.assetId}: ${item.prompt}`).join('\n\n');
+}
+
 export function LineageGenerationSheet({ onClose, onPlanned, project, rootAssetId, sources }: {
   onClose: () => void;
   onPlanned?: (job: GenerationJob) => void;
@@ -20,7 +30,7 @@ export function LineageGenerationSheet({ onClose, onPlanned, project, rootAssetI
 }) {
   const [states, setStates] = useState<NodeNextOutputTargetsResponse[]>([]);
   const [resolutionDigest, setResolutionDigest] = useState('');
-  const [prompt, setPrompt] = useState('');
+  const [prompt, setPrompt] = useState(() => savedVariationPrompt(sources));
   const [variantsPerTarget, setVariantsPerTarget] = useState(1);
   const [preview, setPreview] = useState<GenerationPlanResponse | null>(null);
   const [error, setError] = useState('');
@@ -98,6 +108,7 @@ export function LineageGenerationSheet({ onClose, onPlanned, project, rootAssetI
         <label className="lineage-generation-prompt">
           Generation prompt
           <textarea onChange={event => { setPrompt(event.target.value); setPreview(null); }} value={prompt} />
+          {savedVariationPrompt(sources) && <small>Prefilled from the exact prompt saved on {sources.length === 1 ? 'this node' : 'these nodes'}.</small>}
         </label>
         <label className="lineage-source-default-count">
           Variations per produced geometry

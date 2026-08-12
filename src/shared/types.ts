@@ -1,4 +1,5 @@
 import type { AssetSocialMark } from './socialTypes';
+import type { AssetDiscussionMark } from './discussionMarkTypes';
 
 type AssetStatus = 'planned' | 'working' | 'approved' | 'published' | 'archived';
 export type AssetContentType = 'image' | 'video' | 'gif' | 'audio' | 'doc' | 'other';
@@ -126,6 +127,19 @@ export type {
   LineageSelectionPacketV3Asset,
   LineageSelectionPacketV3IdentityProjection,
 } from './lineageSelectionPacketTypes';
+export type {
+  CollectionPagination,
+  CollectionReorderFields,
+  CollectionSort,
+  DeletionBlocker,
+  DeletionImpactCount,
+  ProjectCollectionSnapshot,
+  ProjectDeletionPlan,
+  ProjectWorkspaceSummary,
+  WorkspaceCollectionKind,
+  WorkspaceCollectionSnapshot,
+  WorkspaceDeletionPlan,
+} from './projectWorkspaceTypes';
 
 export interface ReviewableAsset extends GrowthAsset {
   review?: {
@@ -276,6 +290,8 @@ export interface LineageNode {
   review_notes?: string;
   is_latest: boolean;
   user_selected: boolean;
+  /** Exact prompt saved for the next child branch. `selection_note` remains as a compatibility alias. */
+  branch_prompt?: string;
   selection_note?: string;
   preview_url?: string;
   position?: LineagePosition;
@@ -283,6 +299,7 @@ export interface LineageNode {
   current_attempt?: LineageAttempt;
   lineage_tasks?: Partial<Record<LineageTaskType, LineageTask>>;
   reroll_request?: LineageRerollRequest;
+  discussion_mark?: AssetDiscussionMark;
   social_mark?: AssetSocialMark;
 }
 
@@ -292,7 +309,7 @@ export interface LineagePosition {
 }
 
 interface LineageSelection {
-  asset_id: string; notes?: string; position: number; selected_at: string;
+  asset_id: string; notes?: string; prompt?: string; prompt_status?: 'needs_prompt' | 'ready'; position: number; selected_at: string;
 }
 
 type LineageAttemptSource = 'generated_child' | 'initial' | 'reroll';
@@ -322,7 +339,11 @@ export interface LineageRerollRequest {
   node_asset_id: string;
   status: LineageRerollRequestStatus;
   requested_by: LineageRerollActor;
+  /** Exact prompt saved for the next attempt. `notes` remains as a compatibility alias. */
+  prompt?: string;
   notes?: string;
+  prompt_status?: 'needs_prompt' | 'ready';
+  agent_instruction?: string;
   created_at: string;
   resolved_at?: string;
   task_id?: string;
@@ -351,6 +372,8 @@ export interface LineageTask {
   task_type: LineageTaskType;
   status: LineageTaskStatus;
   instructions?: string;
+  /** Derived execution readiness; older task payloads may omit it. */
+  prompt_status?: 'needs_prompt' | 'ready';
   created_by: LineageTaskActor;
   created_at: string;
   updated_at: string;
@@ -396,6 +419,7 @@ export interface LineageEdge {
 
 export interface LineageSnapshot {
   project: string; root_asset_id: string; active_asset_id: string;
+  next_variation_limit?: number;
   selected: string[]; selection: LineageSelection | null; selections: LineageSelection[];
   latest: string[]; nodes: LineageNode[]; edges: LineageEdge[]; tasks?: LineageTask[]; fetchedAt: string;
 }
@@ -403,6 +427,7 @@ export interface LineageSnapshot {
 export interface LineageNextResponse {
   project: string;
   root_asset_id: string;
+  next_variation_limit?: number;
   strategy: 'selected' | 'single_latest' | 'ambiguous_latest' | 'empty';
   selection_mode: 'none' | 'single' | 'multiple' | 'fallback';
   recommended_action: 'evolve_variations' | 'choose_next_base' | 'none';
@@ -475,6 +500,7 @@ export interface LineageBriefResponse {
     reference_asset_id?: string;
     reference_asset_ids: string[];
     rationale?: string;
+    variation_prompts?: Array<{ asset_id: string; prompt: string }>;
   };
   handoff: {
     next_command: string;

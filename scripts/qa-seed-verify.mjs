@@ -2,7 +2,7 @@
 
 const defaults = {
   baseUrl: process.env.LINEAGE_QA_BASE_URL || 'http://lineage.localhost:5197',
-  project: process.env.LINEAGE_QA_PROJECT || 'demo-project',
+  project: process.env.LINEAGE_QA_PROJECT || 'swissifier-demo',
 };
 
 const args = parseArgs(process.argv.slice(2));
@@ -12,7 +12,6 @@ const prepare = Boolean(args.prepare);
 const json = Boolean(args.json);
 
 const richWorkspaceTitle = 'Swissifier rich demo';
-const richWorkspaceRoot = 'local-5748fb8ba6df';
 const richMediaTotal = 14;
 
 const failures = [];
@@ -24,10 +23,14 @@ try {
   }
 
   const media = await getJson('/api/lineage-workspaces/demo/swissifier/media');
-  const workspaces = await getJson('/api/lineage-workspaces');
-  const activeWorkspace = workspaces.active_workspace;
-  const rootAssetId = activeWorkspace?.root_asset_id || richWorkspaceRoot;
-  const snapshot = await getJson(`/api/lineage/${encodeURIComponent(rootAssetId)}`);
+  const entry = await getJson('/api/projects/demo/swissifier/entry');
+  const projectQuery = `project=${encodeURIComponent(project)}`;
+  const workspaces = await getJson(`/api/lineage-workspaces?${projectQuery}`);
+  const canonicalWorkspace = entry.workspace;
+  const richWorkspace = (workspaces.workspaces || []).find(workspace => workspace.id === canonicalWorkspace?.id);
+  const rootAssetId = canonicalWorkspace?.root_asset_id;
+  if (!rootAssetId) throw new Error('Swissifier demo entry did not return a workspace root.');
+  const snapshot = await getJson(`/api/lineage/${encodeURIComponent(rootAssetId)}?${projectQuery}`);
 
   if (!media.status?.ok) failures.push('Swissifier rich media status endpoint did not return ok=true.');
   if (media.status?.present !== richMediaTotal || media.status?.total !== richMediaTotal) {
@@ -36,11 +39,11 @@ try {
   if ((media.status?.missing || []).length > 0) failures.push(`Swissifier rich media has missing files: ${media.status.missing.join(', ')}`);
   if ((media.status?.invalid || []).length > 0) failures.push(`Swissifier rich media has invalid checksums: ${media.status.invalid.join(', ')}`);
 
-  if (activeWorkspace?.title !== richWorkspaceTitle) {
-    failures.push(`Active workspace is "${activeWorkspace?.title || 'none'}"; expected "${richWorkspaceTitle}".`);
+  if (richWorkspace?.title !== richWorkspaceTitle) {
+    failures.push(`Rich workspace is "${richWorkspace?.title || 'none'}"; expected "${richWorkspaceTitle}".`);
   }
-  if (activeWorkspace?.root_asset_id !== richWorkspaceRoot) {
-    failures.push(`Active workspace root is "${activeWorkspace?.root_asset_id || 'none'}"; expected "${richWorkspaceRoot}".`);
+  if (richWorkspace?.root_asset_id !== rootAssetId) {
+    failures.push(`Rich workspace root is "${richWorkspace?.root_asset_id || 'none'}"; expected canonical root "${rootAssetId}".`);
   }
 
   const nodes = Array.isArray(snapshot.nodes) ? snapshot.nodes : [];
@@ -53,7 +56,7 @@ try {
   if (pngPreviewNodes.length < richMediaTotal) failures.push(`Snapshot has ${pngPreviewNodes.length} PNG preview URLs; expected at least ${richMediaTotal}.`);
   if (svgPreviewNodes.length > 0) failures.push(`Snapshot still has SVG placeholder preview URLs: ${svgPreviewNodes.map(node => node.asset_id).join(', ')}`);
 
-  const rootNode = nodes.find(node => node.asset_id === richWorkspaceRoot) || pngPreviewNodes[0];
+  const rootNode = nodes.find(node => node.asset_id === rootAssetId) || pngPreviewNodes[0];
   const previewProof = rootNode?.preview_url ? await verifyPreview(rootNode.preview_url) : null;
   if (!previewProof) failures.push('No root PNG preview URL was available to verify.');
   else {
@@ -66,8 +69,8 @@ try {
     ok: failures.length === 0,
     baseUrl,
     project,
-    active_workspace: activeWorkspace?.title || null,
-    root_asset_id: activeWorkspace?.root_asset_id || null,
+    active_workspace: richWorkspace?.title || null,
+    root_asset_id: richWorkspace?.root_asset_id || null,
     swissifier_media: {
       present: media.status?.present,
       total: media.status?.total,

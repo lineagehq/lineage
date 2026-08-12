@@ -143,10 +143,14 @@ function buildHandoff(
     ...(targetPlan ? { target_plan: targetPlan } : {}),
   });
   const importCommand = lineageCliCommand(`generate image import --project ${quote(project)} --job-id ${quote(id)} --manifest ${quote('.asset-scratch/generation-output-manifest.json')} --confirm-write`);
+  const sourcePrompts = next.selections
+    .map(selection => ({ asset_id: selection.asset_id, prompt: selection.prompt || selection.notes || '' }))
+    .filter(item => Boolean(item.prompt));
   return {
     schema_version: targetPlan ? 'lineage.generation_handoff.v3' : 'lineage.generation_handoff.v2',
     provider, project, job_id: id, prompt, expected_output_count: count,
     per_base_count: !targetPlan && next.selection_mode === 'multiple' ? perBaseCount : undefined,
+    source_prompts: sourcePrompts.length > 0 ? sourcePrompts : undefined,
     lineage: {
       root_asset_id: next.root_asset_id, parent_asset_id: parent.asset_id, selection_strategy: next.strategy,
       parent_title: parent.title, parent_local_path: parent.local_path, parent_s3_key: parent.s3_key,
@@ -157,6 +161,7 @@ function buildHandoff(
     },
     instructions: [
       'Use Codex image generation outside Lineage server code.',
+      ...(sourcePrompts.length > 0 ? ['Use each source prompt exactly for outputs mapped to that source.'] : []),
       'Write generated output files under .asset-scratch before import.',
       'Do not call live provider APIs from the CLI or server.',
       'Fill every output_manifest entry with its generated file path and a one- or two-word edge summary.',
@@ -194,6 +199,7 @@ function buildRerollHandoff(
     job_id: id,
     prompt,
     expected_output_count: 1,
+    source_prompts: [{ asset_id: target.asset_id, prompt: request.prompt || request.notes || prompt }],
     lineage: {
       root_asset_id: rootAssetId,
       parent_asset_id: target.asset_id,

@@ -88,6 +88,7 @@ function requireAsset(database: DatabaseSync, project: string, assetId: string):
 function taskFromRow(row: Row): LineageTask {
   const metadata = parseMetadata(row.metadata_json);
   const claimId = typeof metadata?.claim_id === 'string' ? metadata.claim_id : undefined;
+  const instructions = typeof row.instructions === 'string' ? row.instructions : undefined;
   return {
     id: String(row.id),
     project_id: String(row.project_id),
@@ -95,7 +96,8 @@ function taskFromRow(row: Row): LineageTask {
     target_asset_id: String(row.target_asset_id),
     task_type: String(row.task_type) as LineageTaskType,
     status: String(row.status) as LineageTaskStatus,
-    instructions: typeof row.instructions === 'string' ? row.instructions : undefined,
+    instructions,
+    prompt_status: instructions?.trim() ? 'ready' : 'needs_prompt',
     created_by: String(row.created_by) as LineageTaskActor,
     created_at: String(row.created_at),
     updated_at: String(row.updated_at),
@@ -131,6 +133,12 @@ function requireTask(database: DatabaseSync, project: string, taskId: string): L
   const task = findTask(database, project, taskId);
   if (!task) throw new LineageTaskError(`Unknown lineage task: ${taskId}`, 404);
   return task;
+}
+
+function requireTaskPrompt(task: LineageTask, action: 'claimed' | 'started'): void {
+  if (task.prompt_status === 'needs_prompt') {
+    throw new LineageTaskError(`Lineage task needs a variation prompt before it can be ${action}.`, 409);
+  }
 }
 
 function taskEvents(database: DatabaseSync, taskId: string): LineageTaskEvent[] {
@@ -202,7 +210,7 @@ export function getLineageTask(project: string, taskId: string) {
 
 export function upsertLineageTask(project: string, fields: {
   createdBy: LineageTaskActor;
-  instructions?: string;
+  instructions?: string | null;
   rootAssetId: string;
   targetAssetId: string;
   taskType: LineageTaskType;
@@ -220,20 +228,21 @@ export function upsertLineageTask(project: string, fields: {
         and status in ('pending', 'claimed', 'in_progress')
       order by created_at desc limit 1
     `).get(normalizedProject, fields.rootAssetId, fields.targetAssetId, taskType) as Row | undefined;
+    const instructionsProvided = fields.instructions !== undefined;
     const instructions = fields.instructions?.trim() || undefined;
     if (existing) {
       const task = taskFromRow(existing);
-      if (task.status !== 'pending' && instructions !== undefined && instructions !== task.instructions) {
+      if (task.status !== 'pending' && instructionsProvided && instructions !== task.instructions) {
         throw new LineageTaskError('Only pending lineage tasks can update instructions.', 409);
       }
-      if (task.status === 'pending' && instructions !== undefined && instructions !== task.instructions) {
+      if (task.status === 'pending' && instructionsProvided && instructions !== task.instructions) {
         const timestamp = nowIso();
         transaction(database, () => {
           const result = database.prepare(`
             update lineage_tasks
             set instructions = ?, updated_at = ?
             where id = ? and status = 'pending'
-          `).run(instructions, timestamp, task.id);
+          `).run(instructions || null, timestamp, task.id);
           assertChanged(result, 'Only pending lineage tasks can update instructions.');
           recordEvent(database, task.id, 'instructions_updated', fields.createdBy, 'Instructions updated.');
         });
@@ -287,6 +296,17 @@ export function updateLineageTaskInstructions(project: string, fields: { taskId:
         where id = ? and status = 'pending'
       `).run(instructions || null, timestamp, task.id);
       assertChanged(result, 'Only pending lineage tasks can update instructions.');
+      if (task.task_type === 'iterate') {
+        database.prepare(`
+          update asset_selections set notes = ?
+          where project_id = ? and root_asset_id = ? and asset_id = ?
+        `).run(instructions || null, normalizedProject, task.root_asset_id, task.target_asset_id);
+      } else if (task.task_type === 'reroll') {
+        database.prepare(`
+          update asset_reroll_requests set notes = ?
+          where project_id = ? and root_asset_id = ? and node_asset_id = ? and status = 'pending'
+        `).run(instructions || null, normalizedProject, task.root_asset_id, task.target_asset_id);
+      }
       recordEvent(database, task.id, 'instructions_updated', 'human', 'Instructions updated.');
     });
     return taskWithEvents(database, normalizedProject, task.id);
@@ -319,6 +339,7 @@ export function claimLineageTask(project: string, fields: { taskId: string; agen
   try {
     const task = requireTask(beforeClaimDb, normalizedProject, fields.taskId);
     if (task.status !== 'pending') throw new LineageTaskError('Only pending lineage tasks can be claimed.', 409);
+    requireTaskPrompt(task, 'claimed');
   } finally {
     beforeClaimDb.close();
   }
@@ -339,6 +360,12 @@ export function claimLineageTask(project: string, fields: { taskId: string; agen
     if (task.status !== 'pending') {
       releaseAgentClaim(claimResult.claim_token);
       throw new LineageTaskError('Only pending lineage tasks can be claimed.', 409);
+    }
+    try {
+      requireTaskPrompt(task, 'claimed');
+    } catch (error) {
+      releaseAgentClaim(claimResult.claim_token);
+      throw error;
     }
     const timestamp = nowIso();
     const metadata = { ...(task.metadata || {}), claim_id: claim.id };
@@ -372,6 +399,7 @@ export function startLineageTask(project: string, fields: { taskId: string; clai
   try {
     const task = requireTask(precheckDatabase, normalizedProject, fields.taskId);
     if (task.status !== 'claimed') throw new LineageTaskError('Only claimed lineage tasks can be started.', 409);
+    requireTaskPrompt(task, 'started');
   } finally {
     precheckDatabase.close();
   }
@@ -389,6 +417,7 @@ export function startLineageTask(project: string, fields: { taskId: string; clai
   try {
     const task = requireTask(database, normalizedProject, fields.taskId);
     if (task.status !== 'claimed') throw new LineageTaskError('Only claimed lineage tasks can be started.', 409);
+    requireTaskPrompt(task, 'started');
     if (task.claimed_by_claim_id && task.claimed_by_claim_id !== validation.claim.id) {
       throw new LineageTaskError('Claim token does not match the task claim.', 409);
     }

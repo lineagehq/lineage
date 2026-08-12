@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from './api';
 import { App } from './App';
 
@@ -34,6 +34,7 @@ afterEach(() => {
   document.body.replaceChildren();
   window.history.replaceState(null, '', '/');
 });
+beforeEach(() => { window.history.replaceState(null, '', '/projects/demo-project/workspaces/workspace-1'); });
 
 describe('App latest project intent', () => {
   it('honors A-to-B-to-A while B lineage refresh is unsettled', async () => {
@@ -54,7 +55,7 @@ describe('App latest project intent', () => {
     expect(container.querySelector('[data-testid="selected-project"]')?.textContent).toBe('project-b');
     act(() => [...container.querySelectorAll('button')].find(button => button.textContent === 'Select A')!.click());
     expect(container.querySelector('[data-testid="selected-project"]')?.textContent).toBe('demo-project');
-    expect(container.querySelector('[data-testid="lineage-project"]')?.textContent).toBe('demo-project');
+    expect(window.location.pathname).toBe('/projects/demo-project/workspaces');
 
     act(() => root.unmount());
   });

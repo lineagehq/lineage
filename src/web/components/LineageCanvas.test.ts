@@ -45,10 +45,11 @@ describe('lineage inspector quick-action safety', () => {
       branchLocked: false,
       branchTitle: 'Use as a base for the next branch (B)',
     });
-    expect(quickActionState(node(), true)).toMatchObject({
+    expect(quickActionState(node(), true, 4, 4)).toMatchObject({
       branchDisabled: true,
+      branchLimitReached: true,
       branchLocked: false,
-      branchTitle: 'The branch selection is full.',
+      branchTitle: '4 of 4 branches queued. Raise the maximum in Canvas settings or remove a branch.',
     });
     expect(quickActionState(node({ user_selected: true }), true)).toMatchObject({
       branchDisabled: false,
@@ -117,6 +118,26 @@ describe('lineage inspector quick-action safety', () => {
       socialTitle: 'Unmark from Social (S)',
     });
   });
+
+  it('exposes a discussion Flag state with the F shortcut', () => {
+    expect(quickActionState(node(), false)).toMatchObject({
+      discussionDisabled: false,
+      discussionSelected: false,
+      discussionTitle: 'Flag for discussion (F)',
+    });
+    expect(quickActionState(node({
+      discussion_mark: { active: true, asset_id: 'local-node', id: 'discussion-1', marked_at: 'now', marked_by: 'human', project_id: 'demo-project', root_asset_id: 'root', updated_at: 'now' },
+      reroll_request: rerollRequest('pending'),
+      social_mark: { active: true, asset_id: 'local-node', id: 'social-1', marked_at: 'now', marked_by: 'human', project_id: 'demo-project', root_asset_id: 'root', updated_at: 'now' },
+      user_selected: true,
+    }), false)).toMatchObject({
+      branchDisabled: false,
+      discussionSelected: true,
+      discussionTitle: 'Remove discussion flag (F)',
+      rerollSelected: true,
+      socialSelected: true,
+    });
+  });
 });
 
 describe('lineage canvas empty-state truthfulness', () => {
@@ -177,6 +198,15 @@ describe('lineage canvas view aids', () => {
     act(() => invoke.click());
     expect(onToggleSocial).toHaveBeenCalledTimes(2);
   });
+
+  it('routes an unbound Canvas back to the Workspaces directory instead of creating in place', async () => {
+    const source = await import('node:fs').then(({ readFileSync }) =>
+      readFileSync(`${process.cwd()}/src/web/components/LineageCanvas.tsx`, 'utf8'));
+
+    expect(source).toContain('onBrowseWorkspaces');
+    expect(source).toContain('Browse workspaces');
+    expect(source).not.toContain('>New lineage</button>');
+  });
 });
 
 async function renderTestCanvas(overrides: Record<string, unknown> = {}) {
@@ -193,11 +223,14 @@ async function renderTestCanvas(overrides: Record<string, unknown> = {}) {
     hoverPreviewsEnabled: false,
     loading: false,
     minimapVisible: false,
+    onBranchLimitReached: vi.fn(),
+    onBrowseWorkspaces: vi.fn(),
     onClearFocus: vi.fn(),
     onEdgesChange: vi.fn(),
     onEdgeEdit: vi.fn(),
     onIndexNow: vi.fn(),
-    onNewLineage: vi.fn(),
+    onEditDiscussionNote: vi.fn(),
+    onEditVariationPrompt: vi.fn(),
     onNodeActionMenu: vi.fn(),
     onNodeInspect: vi.fn(),
     onNodeOpenDetail: vi.fn(),
@@ -209,11 +242,15 @@ async function renderTestCanvas(overrides: Record<string, unknown> = {}) {
     onSelectedAsset: vi.fn(),
     onToggleBranch: vi.fn(),
     onToggleCollapse: vi.fn(),
+    onToggleDiscussion: vi.fn(),
     onToggleReroll: vi.fn(),
     onToggleSocial: vi.fn(),
     onViewportInteraction: vi.fn(),
     replayInteractive: true,
+    selectedCount: 0,
+    selectionLimit: 3,
     selectionFull: false,
+    visibleActions: { branch: true, details: true, flag: true, reroll: true, social: true },
     workspaceProgress: 'ready',
     workspaceRootAssetId: 'local-node',
     ...overrides,

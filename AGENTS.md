@@ -4,6 +4,16 @@ Use an adversarial proof standard. Before declaring work complete, state the use
 
 Do not commit private media, credentials, private campaign data, real presigned URLs, customer content, or local SQLite databases.
 
+Default feature implementation contract:
+
+1. Keep one task aligned to one feature, one branch/worktree, and one pull request. If the objective, branch, profile, database, pull request, or operational phase changes, stop and require a new task or explicit user authorization for the expanded scope.
+2. Start feature work from a freshly fetched `origin/main` in a new `codex/` worktree unless the user explicitly chooses another reviewed base. Before design or code, report an isolation receipt containing the base SHA, branch, clean status, code root, dedicated dev profile, database identity, service origin, and channel-gate result. Preserve every unrelated checkout, worktree, and user change.
+3. Derive and state the smallest useful scope, explicit non-goals, and acceptance criteria from the request. Batch only genuinely blocking or irreversible product decisions into one message with recommended defaults; otherwise proceed autonomously. Do not serialize a design review into repeated one-question or one-section approval turns.
+4. Implement the smallest complete vertical slice. Put speculative follow-ups in a parking lot instead of prebuilding future architecture. Use direct implementation for small, well-bounded changes; reserve heavyweight planning or GoalBuddy for cross-cutting, migration, release, or explicitly requested work.
+5. During iteration, run focused tests and the smallest relevant browser journey. Before pull-request handoff, run the proportional repository gate (`npm run ci` for meaningful changes) plus only the specialized gates relevant to the touched surface. Do not rerun the entire suite after every micro-edit unless the risk justifies it.
+6. Follow the user's declared terminal condition. Commit, push, open or update a pull request, monitor CI, mark ready, merge, release, or change production only when that authority is explicit. Fix CI failures only when they are in scope; separate unrelated repository failures into their own work.
+7. At handoff, state the user-facing claim, the top three realistic failure modes, and the exact evidence gathered. Leave a clean receipt with worktree, branch, commit or diff state, verification results, and any deliberately deferred work.
+
 Five-step channel gate before any operation:
 
 1. Choose exactly one channel: `lineage-stable`, `lineage-preview`, or checkout-only `npm run lineage:dev --`.

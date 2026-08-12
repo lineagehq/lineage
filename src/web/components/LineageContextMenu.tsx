@@ -20,7 +20,9 @@ export function LineageContextMenu({
   onReview,
   onSelectNext,
   onMarkReroll,
+  onEditDiscussionNote,
   onToggleSocial,
+  onToggleDiscussion,
   position,
   selectedCount,
   selectionFull,
@@ -41,6 +43,8 @@ export function LineageContextMenu({
   onSelectNext: () => void;
   onMarkReroll: () => void;
   onToggleSocial: () => unknown;
+  onEditDiscussionNote: () => void;
+  onToggleDiscussion: () => void;
   position: { x: number; y: number };
   selectedCount: number;
   selectionFull: boolean;
@@ -66,6 +70,12 @@ export function LineageContextMenu({
       <button className="social-action" onClick={() => run(onToggleSocial)} role="menuitem">
         Open Social composition
       </button>
+      <button className="discussion-action" onClick={() => run(onToggleDiscussion)} role="menuitem">
+        {node.discussion_mark?.active ? 'Remove discussion flag' : 'Flag for discussion'}
+      </button>
+      {node.discussion_mark?.active && (
+        <button className="discussion-action" onClick={() => run(onEditDiscussionNote)} role="menuitem">Edit discussion note</button>
+      )}
       {claims.length > 0 && (
         <div className="lineage-context-claims" role="group" aria-label="Agent claim controls">
           <span>{claimLabel(claims)}</span>

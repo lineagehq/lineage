@@ -8,10 +8,12 @@ test('collapses lineage branches in both card modes while preserving nested choi
   });
   expect(seed.ok()).toBe(true);
   const seeded = await seed.json() as { workspace?: { id: string } };
+  const workspaceId = seeded.workspace?.id;
+  if (!workspaceId) throw new Error('Demo seed did not return an exact workspace ID');
 
   try {
-    await page.goto('/?project=demo-project&lineageCanvas=portrait');
-    await expect(page.getByRole('region', { name: 'Canvas workspace tools' }).locator('.lineage-workspace-trigger strong'))
+    await page.goto(`/projects/${project}/workspaces/${encodeURIComponent(workspaceId)}?lineageCanvas=portrait`);
+    await expect(page.locator('.lineage-workspace-title strong'))
       .toHaveText('Demo: Content iteration tree', { timeout: 20_000 });
     await expect(page.locator('.react-flow__node')).toHaveCount(10);
     await expect(page.locator('.react-flow__edge')).toHaveCount(9);

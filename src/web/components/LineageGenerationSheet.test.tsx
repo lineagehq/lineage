@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GenerationJob } from '../../shared/generationTypes';
 import type { LineageNode } from '../../shared/types';
-import { LineageGenerationSheet } from './LineageGenerationSheet';
+import { LineageGenerationSheet, savedVariationPrompt } from './LineageGenerationSheet';
 import { selectedNodeTargetResolutionDigest, type NodeNextOutputTargetsResponse } from './NodeNextOutputTargetsModel';
 
 let container: HTMLDivElement;
@@ -26,6 +26,13 @@ afterEach(() => {
 });
 
 describe('LineageGenerationSheet persisted node-target bridge', () => {
+  it('prefills one exact saved prompt or preserves distinct source prompts', () => {
+    expect(savedVariationPrompt([{ ...sources[0], branch_prompt: 'Make it editorial.' }])).toBe('Make it editorial.');
+    expect(savedVariationPrompt([
+      { ...sources[0], branch_prompt: 'Use a red grid.' },
+      { ...sources[1], branch_prompt: 'Use a blue grid.' },
+    ])).toBe('For source source-a: Use a red grid.\n\nFor source source-b: Use a blue grid.');
+  });
   it('resolves independent sources by their canonical aggregate digest and keeps counts job-scoped', async () => {
     const states = [
       nodeState('source-a', 'node_override', 'a'.repeat(64), 1080, 1920, 4),

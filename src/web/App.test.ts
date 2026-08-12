@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 import { act, createElement, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { api } from './api';
 import { App } from './App';
 import { shouldRevealCopiedText } from './copyFallback';
+import { availableProjectSelection, projectFor, projectRouteIsUnavailable } from './projectWorkspaceNavigation';
 
 vi.mock('./api', () => ({ api: vi.fn() }));
 vi.mock('./components/Sidebar', async () => {
@@ -32,13 +33,14 @@ vi.mock('./components/SettingsView', async () => {
 vi.mock('./components/AgentsView', async () => {
   const React = await import('react');
   return { AgentsView: (props: { onOpenWork: (target: unknown) => void }) => React.createElement('section', { 'data-testid': 'agents-view' },
-    React.createElement('button', { onClick: () => props.onOpenWork({ assetId: 'asset-2', claim: { target_id: 'claim-1', target_title: 'Claim' }, view: 'lineage', workspaceId: 'workspace-2' }) }, 'Open agent graph')) };
+    React.createElement('button', { onClick: () => props.onOpenWork({ assetId: 'asset-2', claim: { project: 'demo-project', target_id: 'claim-1', target_title: 'Claim' }, view: 'lineage', workspaceId: 'workspace-2' }) }, 'Open agent graph')) };
 });
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (reason: unknown) => void; const promise = new Promise<T>((next, fail) => { resolve = next; reject = fail; }); return { promise, reject, resolve }; }
 afterEach(() => { vi.restoreAllMocks(); vi.clearAllMocks(); window.history.replaceState(null, '', '/'); });
+beforeEach(() => { window.history.replaceState(null, '', '/projects/demo-project/workspaces/workspace-1'); });
 
 describe('shouldRevealCopiedText', () => {
-  it('coordinates a delayed dirty project fallback using current cancel and accept state', async () => {
+  it('does not let a delayed project catalog redirect a valid dirty Canvas route', async () => {
     const projects = deferred<{ projects: Array<{ project: string }> }>();
     vi.mocked(api).mockImplementation((path: string) => {
       if (path === '/api/projects') return projects.promise;
@@ -49,20 +51,11 @@ describe('shouldRevealCopiedText', () => {
     const container = document.createElement('div'); document.body.appendChild(container); const root = createRoot(container);
     await act(async () => { root.render(createElement(App)); await Promise.resolve(); });
     act(() => [...container.querySelectorAll('button')].find(button => button.textContent === 'Dirty Social')!.click());
-    await act(async () => projects.resolve({ projects: [{ project: 'fallback-project' }] }));
+    await act(async () => projects.resolve({ projects: [{ project: 'demo-project' }, { project: 'fallback-project' }] }));
     expect(container.querySelector('[data-testid="app-project"]')?.textContent).toBe('demo-project');
-    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(window.location.pathname).toBe('/projects/demo-project/workspaces/workspace-1');
+    expect(confirm).not.toHaveBeenCalled();
     act(() => root.unmount()); container.remove();
-
-    const acceptedProjects = deferred<{ projects: Array<{ project: string }> }>();
-    vi.mocked(api).mockImplementation((path: string) => path === '/api/projects' ? acceptedProjects.promise : path.startsWith('/api/assets?') ? Promise.resolve({ catalog: { project: 'demo-project', asset_count: 0 }, assets: [], liveObjects: [], orphanObjects: [], facets: { channels: [], totalSizeBytes: 0 } }) : Promise.reject(new Error('Runtime identity unavailable')));
-    confirm.mockReturnValue(true);
-    const acceptedContainer = document.createElement('div'); document.body.appendChild(acceptedContainer); const acceptedRoot = createRoot(acceptedContainer);
-    await act(async () => { acceptedRoot.render(createElement(App)); await Promise.resolve(); });
-    act(() => [...acceptedContainer.querySelectorAll('button')].find(button => button.textContent === 'Dirty Social')!.click());
-    await act(async () => acceptedProjects.resolve({ projects: [{ project: 'fallback-project' }] }));
-    expect(acceptedContainer.querySelector('[data-testid="app-project"]')?.textContent).toBe('fallback-project');
-    act(() => acceptedRoot.unmount()); acceptedContainer.remove();
   });
 
   it('does not let delayed fallback settle through child ownership or an unchanged catalog', async () => {
@@ -97,24 +90,6 @@ describe('shouldRevealCopiedText', () => {
     act(() => root.unmount()); container.remove();
   });
 
-  it('does not let delayed fallback settle through an App-owned navigation token', async () => {
-    const projects = deferred<{ projects: Array<{ project: string }> }>(); const activation = deferred<unknown>();
-    vi.mocked(api).mockImplementation((path: string) => {
-      if (path === '/api/projects') return projects.promise;
-      if (path.endsWith('/activate')) return activation.promise;
-      if (path.startsWith('/api/assets?')) return Promise.resolve({ catalog: { project: 'demo-project', asset_count: 0 }, assets: [], liveObjects: [], orphanObjects: [], facets: { channels: [], totalSizeBytes: 0 } });
-      return Promise.reject(new Error('Runtime identity unavailable'));
-    });
-    const container = document.createElement('div'); document.body.appendChild(container); const root = createRoot(container);
-    await act(async () => { root.render(createElement(App)); await Promise.resolve(); });
-    act(() => [...container.querySelectorAll('button')].find(button => button.textContent === 'Open agents')!.click());
-    act(() => [...container.querySelectorAll('button')].find(button => button.textContent === 'Open agent graph')!.click());
-    await act(async () => projects.resolve({ projects: [{ project: 'fallback-project' }] }));
-    expect(container.querySelector('[data-testid="app-project"]')?.textContent).toBe('demo-project');
-    expect(container.querySelector('[data-testid="agents-view"]')).not.toBeNull();
-    await act(async () => activation.reject(new Error('activation failed')));
-    act(() => root.unmount()); container.remove();
-  });
   it('protects App view and project transitions with one deliberate dirty-discard decision', () => {
     const source = readFileSync(join(process.cwd(), 'src/web/App.tsx'), 'utf8');
     expect(source).toContain('return !dirty || confirmDiscard();');
@@ -146,31 +121,24 @@ describe('shouldRevealCopiedText', () => {
     act(() => root.unmount()); container.remove();
   });
 
-  it('keeps deferred agent navigation transactional across failure and retry', async () => {
-    const first = deferred<unknown>(); const second = deferred<unknown>(); let activations = 0;
+  it('guards agent-to-Canvas navigation and opens the exact linked workspace after acceptance', async () => {
     vi.mocked(api).mockImplementation((path: string) => {
       if (path === '/api/projects') return Promise.resolve({ projects: [{ project: 'demo-project' }] });
       if (path.startsWith('/api/assets?')) return Promise.resolve({ catalog: { project: 'demo-project', asset_count: 0 }, assets: [], liveObjects: [], orphanObjects: [], facets: { channels: [], totalSizeBytes: 0 } });
-      if (path.endsWith('/activate')) return (++activations === 1 ? first : second).promise;
       return Promise.reject(new Error('Runtime identity unavailable'));
     });
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
     const container = document.createElement('div'); document.body.appendChild(container); const root = createRoot(container);
     await act(async () => { root.render(createElement(App)); await Promise.resolve(); });
     act(() => [...container.querySelectorAll('button')].find(button => button.textContent === 'Dirty Social')!.click());
     act(() => [...container.querySelectorAll('button')].find(button => button.textContent === 'Open agents')!.click());
-    act(() => [...container.querySelectorAll('button')].find(button => button.textContent === 'Open agent graph')!.click());
-    expect(container.querySelector('[data-testid="agents-view"]')).not.toBeNull();
-    act(() => [...container.querySelectorAll('button')].find(button => button.textContent === 'Open agent graph')!.click());
-    expect(activations).toBe(1);
-    act(() => [...container.querySelectorAll('button')].find(button => button.textContent === 'Change view')!.click());
-    expect(container.querySelector('[data-testid="agents-view"]')).not.toBeNull();
-    await act(async () => first.reject(new Error('activation failed')));
-    expect(container.querySelector('[data-testid="agents-view"]')).not.toBeNull();
-    act(() => [...container.querySelectorAll('button')].find(button => button.textContent === 'Open agent graph')!.click());
-    await act(async () => second.resolve({}));
     expect(container.querySelector('[data-testid="lineage-view"]')).not.toBeNull();
-    expect(activations).toBe(2);
+    confirm.mockReturnValue(true);
+    act(() => [...container.querySelectorAll('button')].find(button => button.textContent === 'Open agents')!.click());
+    act(() => [...container.querySelectorAll('button')].find(button => button.textContent === 'Open agent graph')!.click());
+    expect(container.querySelector('[data-testid="lineage-view"]')).not.toBeNull();
+    expect(window.location.pathname).toBe('/projects/demo-project/workspaces/workspace-2');
+    expect(confirm).toHaveBeenCalledTimes(2);
     act(() => root.unmount()); container.remove();
   });
 
@@ -205,6 +173,19 @@ describe('shouldRevealCopiedText', () => {
     expect(source).not.toContain("method: 'POST'");
   });
 
+  it('opens agent work only through a canonical destination', () => {
+    const source = readFileSync(join(process.cwd(), 'src/web/App.tsx'), 'utf8');
+    const start = source.indexOf('async function openAgentWork');
+    const end = source.indexOf('function toggleLocalBackup', start);
+    const handoff = source.slice(start, end);
+
+    expect(handoff).toContain("if (!target.workspaceId)");
+    expect(handoff).toContain('is not linked to an exact Canvas workspace');
+    expect(handoff).toContain("navigate({ kind: 'canvas', projectId: target.claim.project, workspaceId: target.workspaceId })");
+    expect(handoff).toContain("navigate({ kind: 'studio', projectId: target.claim.project, view: target.view })");
+    expect(handoff).not.toContain('setView(target.view)');
+  });
+
   it('composes the rail and contextual utilities outside the workspace', () => {
     const source = readFileSync(join(process.cwd(), 'src/web/App.tsx'), 'utf8');
     const sidebarStart = source.indexOf('<Sidebar');
@@ -218,5 +199,31 @@ describe('shouldRevealCopiedText', () => {
     expect(source).toContain('mobile-context-open');
     expect(source).not.toContain('CurrentWorkTarget');
     expect(source).not.toContain('Agent context');
+  });
+
+  it('does not preload a catalog while the lineage canvas owns the workspace surface', () => {
+    const source = readFileSync(join(process.cwd(), 'src/web/App.tsx'), 'utf8');
+
+    expect(source).toContain("return surface === 'studio' && view !== 'lineage'");
+    expect(source).toContain('if (shouldRefreshAssetLibrary(surface, view)) void refresh()');
+  });
+
+  it('starts Projects without a phantom default and replaces deleted selections deterministically', () => {
+    const projects = [
+      { id: 'survivor' },
+      { id: 'second' },
+    ] as Parameters<typeof availableProjectSelection>[1];
+
+    expect(projectFor({ kind: 'projects' })).toBe('');
+    expect(availableProjectSelection('deleted-project', projects)).toBe('survivor');
+    expect(availableProjectSelection('second', projects)).toBe('second');
+    expect(availableProjectSelection('deleted-project', [])).toBe('');
+    expect(projectRouteIsUnavailable({ kind: 'project', projectId: 'deleted-project' }, projects)).toBe(true);
+    expect(projectRouteIsUnavailable({ kind: 'project', projectId: 'survivor' }, projects)).toBe(false);
+    const source = readFileSync(join(process.cwd(), 'src/web/App.tsx'), 'utf8');
+    expect(source).toContain("`/api/projects/${encodeURIComponent(unavailableProject)}`");
+    expect(source).toContain('availableProjects = [...normalizedProjects, detail.project]');
+    expect(source).not.toContain('onOpenDemo=');
+    expect(source).toContain('setProjects(current => rememberProjectSummary(current, nextProject))');
   });
 });

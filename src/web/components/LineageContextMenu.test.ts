@@ -174,6 +174,30 @@ describe('LineageContextMenu', () => {
     expect(events).toEqual([]);
   });
 
+  it('toggles a discussion Flag independently', () => {
+    const events: string[] = [];
+    const unmarked = LineageContextMenu(baseProps(node, events));
+    collectButtons(unmarked).find(button => flattenText(button) === 'Flag for discussion')?.props.onClick();
+    const marked = LineageContextMenu(baseProps({
+      ...node,
+      discussion_mark: { active: true, asset_id: node.asset_id, id: 'discussion-1', marked_at: 'now', marked_by: 'human', project_id: node.project, root_asset_id: 'root-asset', updated_at: 'now' },
+    }, events));
+    collectButtons(marked).find(button => flattenText(button) === 'Remove discussion flag')?.props.onClick();
+    expect(events).toEqual(['toggle-discussion', 'close', 'toggle-discussion', 'close']);
+  });
+
+  it('opens the discussion note editor without removing an active flag', () => {
+    const events: string[] = [];
+    const marked = LineageContextMenu(baseProps({
+      ...node,
+      discussion_mark: { active: true, asset_id: node.asset_id, id: 'discussion-1', marked_at: 'now', marked_by: 'human', notes: 'Compare sizing', project_id: node.project, root_asset_id: 'root-asset', updated_at: 'now' },
+    }, events));
+
+    collectButtons(marked).find(button => flattenText(button) === 'Edit discussion note')?.props.onClick();
+
+    expect(events).toEqual(['edit-discussion-note', 'close']);
+  });
+
   it('routes remove from lineage and closes after confirmation path starts', () => {
     const events: string[] = [];
     const menu = LineageContextMenu(baseProps(node, events));
@@ -228,6 +252,7 @@ function baseProps(
     onClearNext: () => events.push('clear'),
     onClearReroll: () => events.push('clear-reroll'),
     onClose: () => events.push('close'),
+    onEditDiscussionNote: () => events.push('edit-discussion-note'),
     onMarkReroll: () => events.push('mark-reroll'),
     onOpenDetail: () => events.push('detail'),
     onRemoveFromLineage: () => events.push('remove-lineage'),
@@ -235,6 +260,7 @@ function baseProps(
     onReview: (reviewState: string) => events.push(`review:${reviewState}`),
     onSelectNext: () => events.push('select'),
     onToggleSocial: () => events.push('toggle-social'),
+    onToggleDiscussion: () => events.push('toggle-discussion'),
     position: { x: 20, y: 20 },
     selectedCount: options.selectedCount ?? (nextNode.user_selected ? 1 : 0),
     selectionFull: options.selectionFull ?? false,

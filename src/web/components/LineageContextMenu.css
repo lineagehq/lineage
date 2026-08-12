@@ -110,6 +110,16 @@
   color: #30418f;
 }
 
+.lineage-context-menu button.discussion-action {
+  color: #70580f;
+}
+
+.lineage-context-menu button.discussion-action:hover,
+.lineage-context-menu button.discussion-action:focus-visible {
+  background: #fff9d9;
+  color: #594506;
+}
+
 .lineage-context-menu button.danger:hover,
 .lineage-context-menu button.danger:focus-visible {
   background: #fff0f0;

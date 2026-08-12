@@ -102,22 +102,35 @@ initialization reports an existing but unhealthy profile, run the exact
 
 ### Using the navigation shell
 
-The left rail exposes every destination directly: Canvas, Assets, Content
-batches, Review, Backup queue, Agents, Ledger, and Settings. The adjacent
-context panel contains the current project plus controls that apply to the
-active destination. Collapse that panel when you want more room; its desktop
-state is remembered in this browser. On mobile, the rail becomes a menu button
-that opens the same navigation and context as a drawer.
+Lineage opens on Projects. Choose a project to reach its dedicated Workspaces
+page, where workspaces can be searched, reordered, archived, deleted, and
+opened in Canvas. Project-scoped destinations appear in the left rail only
+after entering a project: Workspaces, Canvas, Assets, Content batches, Review,
+Backup queue, Agents, Ledger, and Settings. **Workspaces** always opens the
+project directory. After you open a workspace, **Canvas** returns to that exact
+workspace in the current browser tab, including its card presentation. Use the
+**L** mark to return to Projects; About Lineage remains available from the
+information button at the bottom of the rail.
 
-Canvas uses the remaining viewport without a top toolbar. Its context panel
-contains the workspace picker, node/link count, Replay growth, New lineage,
-Plan outputs, output defaults, and selection management. Maintenance and
-Demo/QA are collapsed by default. Archive current lineage remains under
-**Workspace options** and uses destructive styling.
+The adjacent context panel contains the current project plus controls that
+apply to the active destination. Collapse it when you want more room, then
+select the active rail destination to reopen it; its desktop state is
+remembered in this browser. On mobile, the rail becomes a menu button that
+opens the same navigation and context as a drawer.
+
+Canvas uses the remaining viewport without a top toolbar. A compact location
+bar keeps the workspace title visible and provides a separate **Workspaces**
+back action. The context panel shows that workspace's identity, node/link
+count, Replay growth, Plan outputs, output defaults, and selection management.
+Maintenance and Demo/QA are collapsed by default. Workspace creation and
+lifecycle management live on the Workspaces page rather than in a Canvas
+switcher.
 
 Use the gear at the upper right of Canvas for presentation and graph controls:
 compact or portrait cards, direction, edge weight, edge labels, hover
-previews, minimap visibility, Fit graph, Tidy tree, and Reset appearance.
+previews, minimap visibility, the maximum queued branches, independent Branch
+and Re-roll prompt behavior, prompt editing in the variation queue, Fit graph,
+Tidy tree, and Reset appearance.
 Visual choices use direct option cards, while minimap, edge labels, and hover
 previews use on/off switches. These appearance choices are stored in the
 browser. Canvas settings, selection, and Canvas asset details share one
@@ -125,6 +138,16 @@ right-side panel, so opening one replaces the other; on mobile that panel
 becomes a bottom sheet. Panel and control transitions respect the system's
 reduced-motion preference. Agent handoff now flows through the direct agent/UX
 bridge and the Agents view rather than a separate bottom Agent Context drawer.
+
+Choose **Branch** or **Re-roll** on a node—or focus it and press **B** or
+**R**—to queue that action. By default, Lineage first offers an exact prompt;
+the two **Ask for … prompt** Canvas switches can independently make Branch or
+Re-roll a one-step mark instead. Saved prompts remain visible on the node and
+are included in agent-readable task and generation handoffs. Open
+**Variation queue** from the context panel or press **V** to see all queued
+actions in one scroll, highlight their nodes, focus an item on the unobstructed
+Canvas, edit its prompt, or remove it. Blank prompts remain explicitly missing
+so the agent asks what should change instead of guessing.
 
 Nodes with descendants show a small count control beside their outgoing
 connection. Select it to collapse or expand that branch. Collapse state is

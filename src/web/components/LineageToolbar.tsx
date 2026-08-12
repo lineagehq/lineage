@@ -1,8 +1,8 @@
+import { Network } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { LineageSnapshot, LineageWorkspace } from '../../shared/types';
 import type { LineageWorkspaceProgress } from './LineageCanvas';
 import type { DemoSeedMediaStatus } from './useLineageWorkspaces';
-import { LineageWorkspacePicker } from './LineageWorkspacePicker';
 import './LineageToolbar.css';
 
 type LineageToolbarProps = {
@@ -10,10 +10,8 @@ type LineageToolbarProps = {
   closeSignal: number;
   demoSeedStatus: DemoSeedMediaStatus | null;
   loading: boolean;
-  onArchiveWorkspace: () => void;
   onDownloadSwissifierMedia: () => void;
   onIndexLocal: () => void;
-  onNewLineage: () => void;
   onOpenGeneration?: () => void;
   onOpenOutputDefaults?: () => void;
   onRefreshLineage: () => void;
@@ -23,7 +21,6 @@ type LineageToolbarProps = {
   onRestoreSwissifierMedia: () => void;
   onSeedDemo: () => void;
   onSeedSwissifierDemo: () => void;
-  onSelectWorkspace: (workspaceId: string) => void;
   onToggleNextPanel: () => void;
   sideOpen: boolean;
   replayActive: boolean;
@@ -32,7 +29,7 @@ type LineageToolbarProps = {
   workspaceLoading: boolean;
   workspaceProgress: LineageWorkspaceProgress;
   workspaceRootAssetId: string;
-  workspaces: LineageWorkspace[];
+  variationQueueCount: number;
 };
 
 export function LineageToolbar({
@@ -40,10 +37,8 @@ export function LineageToolbar({
   closeSignal,
   demoSeedStatus,
   loading,
-  onArchiveWorkspace,
   onDownloadSwissifierMedia,
   onIndexLocal,
-  onNewLineage,
   onOpenGeneration,
   onOpenOutputDefaults,
   onRefreshLineage,
@@ -53,7 +48,6 @@ export function LineageToolbar({
   onRestoreSwissifierMedia,
   onSeedDemo,
   onSeedSwissifierDemo,
-  onSelectWorkspace,
   onToggleNextPanel,
   sideOpen,
   replayActive,
@@ -62,7 +56,7 @@ export function LineageToolbar({
   workspaceLoading,
   workspaceProgress,
   workspaceRootAssetId,
-  workspaces,
+  variationQueueCount,
 }: LineageToolbarProps) {
   const [demoToolsOpen, setDemoToolsOpen] = useState(false);
   const [maintenanceOpen, setMaintenanceOpen] = useState(false);
@@ -97,15 +91,18 @@ export function LineageToolbar({
   return (
     <section className="lineage-context-tools">
       <div className="lineage-primary-controls">
-        <LineageWorkspacePicker
-          activeWorkspace={activeWorkspace}
-          closeSignal={closeSignal}
-          loading={workspaceBusy}
-          onArchive={onArchiveWorkspace}
-          onSelect={onSelectWorkspace}
-          workspaces={workspaces}
-        />
-        <p className="lineage-toolbar-context">{workspaceContext}</p>
+        <div
+          aria-label={`Current canvas: ${activeWorkspace?.title || 'No workspace selected'}`}
+          className="lineage-workspace-context"
+        >
+          <span aria-hidden="true" className="lineage-workspace-context-icon"><Network size={17} /></span>
+          <span className="lineage-workspace-context-copy">
+            <span>Current canvas</span>
+            <strong>{activeWorkspace?.title || 'No workspace selected'}</strong>
+            <span className="lineage-toolbar-context">{workspaceContext}</span>
+          </span>
+          {activeWorkspace && <span className="lineage-workspace-context-state">Open</span>}
+        </div>
         <button
           aria-pressed={replayActive}
           className="secondary-button lineage-replay-launch"
@@ -115,10 +112,11 @@ export function LineageToolbar({
         >
           Replay growth
         </button>
-        <button className="primary-button" onClick={onNewLineage} type="button">New lineage</button>
         {onOpenGeneration && <button className="primary-button" disabled={!snapshot || snapshot.selected.length === 0} onClick={onOpenGeneration} type="button">Plan outputs</button>}
         {onOpenOutputDefaults && <button className="secondary-button" disabled={!snapshot} onClick={onOpenOutputDefaults} type="button">Output target defaults</button>}
-        <button aria-controls="lineage-canvas-panel" aria-expanded={sideOpen} className="secondary-button" disabled={!snapshot} onClick={onToggleNextPanel} type="button">Manage selection</button>
+        <button aria-controls="lineage-canvas-panel" aria-expanded={sideOpen} aria-keyshortcuts="V" className="secondary-button lineage-variation-queue-launch" disabled={!snapshot} onClick={onToggleNextPanel} type="button">
+          <span>Variation queue</span><span className="lineage-toolbar-count">{variationQueueCount}</span><kbd>V</kbd>
+        </button>
       </div>
       <div className="lineage-tool-sections">
         <details className="lineage-tool-section" onToggle={event => setMaintenanceOpen(event.currentTarget.open)} open={maintenanceOpen}>

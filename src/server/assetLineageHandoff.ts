@@ -23,19 +23,31 @@ export function getLineageBrief(project: string, rootAssetId?: string): LineageB
   const assets = next.next_assets;
   const asset = next.next_asset;
   const referenceAssetIds = assets.map(item => item.asset_id);
-  const rationale = next.selections.map(selection => selection.notes).find(Boolean) || asset?.selection_note || next.selection?.notes;
+  const variationPrompts = next.selections
+    .map(selection => ({ asset_id: selection.asset_id, prompt: selection.prompt || selection.notes || '' }))
+    .filter(item => Boolean(item.prompt));
+  const missingVariationPromptIds = next.selections
+    .filter(selection => !(selection.prompt || selection.notes || '').trim())
+    .map(selection => selection.asset_id);
+  const rationale = variationPrompts[0]?.prompt || asset?.branch_prompt || asset?.selection_note || next.selection?.prompt || next.selection?.notes;
   const channels = [...new Set(assets.map(item => item.channel || 'unknown'))];
   const campaigns = [...new Set(assets.map(item => item.campaign || 'unknown'))];
+  const nextVariationLimit = next.next_variation_limit || 3;
   const prompt = assets.length > 0
     ? [
       assets.length === 1
         ? `Create 3-4 variations from asset ${assets[0].asset_id} (${assets[0].title}).`
         : `Create 3-4 variations using these ${assets.length} selected references: ${referenceAssetIds.join(', ')}.`,
-      rationale ? `Preserve this selection rationale: ${rationale}` : 'Preserve the strongest visible ideas while exploring distinct alternatives.',
+      variationPrompts.length > 0
+        ? `Follow the exact saved variation prompt${variationPrompts.length === 1 ? '' : 's'}: ${variationPrompts.map(item => `${item.asset_id}: ${item.prompt}`).join(' | ')}`
+        : undefined,
+      missingVariationPromptIds.length > 0
+        ? `No variation prompt was provided for ${missingVariationPromptIds.join(', ')}. Ask the user what they want changed before generating.`
+        : undefined,
       `Keep project=${project}, root=${next.root_asset_id}, channels=${channels.join(',')}, campaigns=${campaigns.join(',')}.`,
       'After generation, index outputs and link chosen children with lineage link-child.',
-    ].join(' ')
-    : 'Select one to three latest lineage candidates before generating variations.';
+    ].filter(Boolean).join(' ')
+    : `Select up to ${nextVariationLimit} latest lineage candidate${nextVariationLimit === 1 ? '' : 's'} before generating variations.`;
   return {
     project,
     root_asset_id: next.root_asset_id,
@@ -48,7 +60,12 @@ export function getLineageBrief(project: string, rootAssetId?: string): LineageB
     selection: next.selection,
     selections: next.selections,
     latest: next.latest,
-    warnings: next.warnings,
+    warnings: [
+      ...next.warnings,
+      ...(missingVariationPromptIds.length > 0
+        ? [`Missing variation prompt for ${missingVariationPromptIds.join(', ')}; ask the user before generating.`]
+        : []),
+    ],
     brief: {
       title: asset ? `Evolve ${assets.length > 1 ? `${assets.length} selected bases` : asset.title}` : 'Choose next lineage base',
       objective: asset ? 'Generate the next branch of visual variations from the selected lineage base or bases.' : 'Resolve the next base before generation.',
@@ -56,6 +73,7 @@ export function getLineageBrief(project: string, rootAssetId?: string): LineageB
       reference_asset_id: asset?.asset_id,
       reference_asset_ids: referenceAssetIds,
       rationale,
+      variation_prompts: variationPrompts.length > 0 ? variationPrompts : undefined,
     },
     handoff: {
       next_command: lineageCommand('next', project, next.root_asset_id),

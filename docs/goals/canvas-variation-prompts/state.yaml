@@ -1,0 +1,460 @@
+version: 2
+
+goal:
+  title: "Canvas Variation Prompts and Codex Handoff"
+  slug: "canvas-variation-prompts"
+  kind: specific
+  tranche: "Implement and prove the full persisted branch/reroll prompt vertical slice, then establish the safe direct-handoff boundary."
+  status: done
+  oracle:
+    signal: "A verified checkout-dev browser and CLI/API walkthrough persists distinct branch/reroll prompts across reload and exposes them to profile-scoped Codex generation planning."
+    cadence: "after each Worker package and at final audit"
+    final_proof: "Focused storage/API/CLI/UI tests, full relevant gates, and desktop/narrow browser evidence mapped to both branch and reroll flows."
+  intake:
+    original_request: "Start fresh from GitHub main and add exact persisted prompts to Canvas branch/reroll selections, visible on nodes and available to Codex; explore direct Canvas-to-Codex generation."
+    interpreted_outcome: "Canvas becomes the durable instruction surface for image variations and Codex consumes the same saved intent without re-entry."
+    input_shape: specific
+    audience: "Lineage users and Codex image-generation sessions"
+    authority: requested
+    proof_type: demo
+    completion_proof: "A user can author, edit, persist, revisit, and consume variation prompts for branch and reroll targets, with a truthfully safe direct-handoff disposition."
+    likely_misfire: "A browser-only prompt editor or opaque dispatch button that is disconnected from Lineage's profile-scoped generation contract."
+    blind_spots_considered:
+      - "Prompt belongs to a branch request versus a reroll attempt."
+      - "Existing promptless selections remain valid."
+      - "Edit, clear, reload, and stale-selection behavior."
+      - "Desktop and narrow-screen usability."
+      - "Codex may not be open or addressable from a web app."
+      - "Direct work initiation requires explicit consent and inspectable status."
+    existing_plan_facts:
+      - "Leave landing and walkthrough branches untouched."
+      - "Base the new branch directly on freshly fetched origin/main."
+      - "Reuse existing branch/reroll selection and image-generation planning contracts."
+
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  planning_is_not_completion: true
+  queued_required_worker_blocks_completion: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  exact_human_approval_can_terminal_wait: true
+  preserve_and_validate_existing_plan: true
+  intake_misfire_must_be_audited: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+  slice_policy:
+    max_consecutive_tiny_tasks: 2
+    prefer_vertical_slices: true
+    judge_picks_largest_safe_slice: true
+    worker_completes_whole_slice: true
+
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+
+visual_board:
+  selected: local
+  local:
+    status: live
+    url: "http://goalbuddy.localhost:41737/canvas-variation-prompts/"
+    command: "node /Users/neonwatty/.codex/plugins/cache/goalbuddy/goalbuddy/0.4.1/skills/goal-prep/surfaces/local-goal-board/scripts/local-goal-board.mjs --goal docs/goals/canvas-variation-prompts"
+
+active_task: null
+
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: done
+    reasoning_hint: high
+    objective: "Map the existing Canvas branch/reroll selection, persistence, node projection, CLI/agent handoff, and image-generation planning path; determine whether a safe direct Canvas-to-Codex transport already exists."
+    inputs:
+      - "src/web"
+      - "src/server.ts and server modules"
+      - "src/cli"
+      - "database schema and migrations"
+      - "tests and e2e flows covering selection, reroll, branching, and generation"
+    constraints:
+      - "Read-only."
+      - "Do not edit implementation files."
+      - "Use concrete file, symbol, route, table, and command evidence."
+      - "Distinguish Codex-readable handoff from autonomous task dispatch."
+    expected_output:
+      - "End-to-end current-state map"
+      - "Compatible persistence model options"
+      - "Direct-send feasibility finding"
+      - "Largest safe vertical Worker package with exact allowed_files and verify commands"
+    receipt:
+      result: done
+      summary: "The durable substrate already exists: branch selections persist `asset_selections.notes` and mirror them into pending iterate-task instructions; rerolls persist `asset_reroll_requests.notes` and mirror them into pending reroll-task instructions. Snapshots expose `selection_note` and `reroll_request.notes`; CLI selection packets and reroll lists expose them to Codex. The UX labels branch text as rationale, captures no reroll text at selection time, and node cards show only badges. Generation planning still requires a separately re-entered global prompt. Direct dispatch does not exist: handoffs are deliberately `codex-handoff` with `live_generation:false` and `external_services:false`; durable claimable Lineage tasks are available, but Lineage has no safe address/wake transport for a Codex desktop task."
+      evidence:
+        - "src/server/assetLineage.ts:updateSelectedAsset"
+        - "src/server/assetLineage.ts:markLineageRerollRequest"
+        - "src/server/assetLineageTasks.ts:upsertLineageTask"
+        - "src/server/lineageSelectionPacket.ts:getLineageSelectionPacketV3"
+        - "src/shared/lineageSelectionPacketTypes.ts:LineageSelectionPacketV3"
+        - "src/web/components/LineageView.tsx:selectNextBase"
+        - "src/web/components/LineageView.tsx:markReroll"
+        - "src/web/components/LineageSidePanel.tsx:LineageSidePanel"
+        - "src/web/components/LineageAssetNode.tsx:AssetNode"
+        - "src/web/components/LineageGenerationSheet.tsx:LineageGenerationSheet"
+        - "src/server/generationReceipts.ts:buildHandoff"
+        - "src/server/generationReceipts.ts:buildRerollHandoff"
+        - "src/server/lineageTaskRoutes.ts:registerLineageTaskRoutes"
+      facts:
+        - "Branch and reroll prompt ownership must remain distinct because both states can exist independently and use different import semantics."
+        - "The existing notes columns can provide backward-compatible storage, while explicit prompt aliases in typed projections can make the product contract unambiguous without a migration."
+        - "The safest vertical slice opens a prompt composer before creating either selection, persists the text through existing notes/task-instruction writes, renders a compact prompt affordance on each node, and pre-fills branch/reroll planners from the saved prompt."
+        - "Codex can already discover and claim pending iterate/reroll tasks, but no repository code can wake or route a specific Codex desktop conversation."
+        - "A direct Canvas action can safely create an inspectable planned generation job, but actual image generation must remain a Codex-side action until an authenticated task transport exists."
+      contradictions:
+        - "The current generated branch brief treats notes as a rationale and the planner requires a separate prompt, so saved intent is not yet the exact generation instruction end to end."
+        - "The current reroll handoff tells the agent to ask for or use a target-specific prompt even though reroll notes/task instructions may already contain it."
+      ambiguity_requiring_judge:
+        - "Whether a direct Canvas action should stop at queueing the durable Lineage task, or additionally create a planned generation job immediately after an explicit preview/confirm step."
+        - "Whether multiple branch sources should support distinct per-source prompts in one job or require one selected source per prompt for the first release."
+      commands:
+        - "rg and sed source inspection across Canvas, server storage, selection packet, task queue, and generation handoff contracts"
+      note_needed: false
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Choose the prompt ownership, persistence, UX, and Codex handoff design and define the first safe vertical Worker package."
+    inputs:
+      - "T001 receipt"
+      - "Goal oracle and constraints"
+    constraints:
+      - "Read-only."
+      - "Reject browser-only storage and hidden autonomous dispatch."
+      - "Preserve compatibility for existing promptless selections."
+    expected_output:
+      - "Approved architecture decision"
+      - "Exact Worker objective"
+      - "allowed_files"
+      - "verify"
+      - "stop_if"
+      - "Direct-send now, defer, or block decision"
+    receipt:
+      result: done
+      decision: approved
+      full_outcome_complete: false
+      rationale: "Use the existing profile-scoped notes/instructions storage as the backward-compatible physical representation, but expose explicit branch_prompt and reroll prompt contracts. Open one focused prompt composer before adding a branch or reroll; require non-empty prompt for new Canvas selections; permit legacy promptless records to render. Show a compact, clickable prompt preview on selected node cards and in the selection queue. Mirror edits into pending lineage task instructions, selection packets, briefs, reroll lists, and generation handoffs. Prefill planning from saved prompts. Treat direct send as durable queueing for Codex, not as a claim that an external Codex desktop task was awakened."
+      worker_package:
+        objective: "Implement the full persisted Canvas variation-prompt vertical slice for branch and reroll: prompt composer, edit/review affordances on nodes and selection panel, backward-compatible storage aliases, task/packet/brief/handoff projection, and saved-prompt planning defaults."
+        allowed_files:
+          - src/shared/types.ts
+          - src/shared/lineageSelectionPacketTypes.ts
+          - src/shared/generationTypes.ts
+          - src/server/assetLineage.ts
+          - src/server/assetLineage.test.ts
+          - src/server/assetLineageHandoff.ts
+          - src/server/lineageSelectionPacket.ts
+          - src/server/lineageSelectionPacket.test.ts
+          - src/server/generationReceipts.ts
+          - src/server/generationReceipts.test.ts
+          - src/cli/lineageCli.ts
+          - src/cli/lineageCli.test.ts
+          - src/web/components/LineageView.tsx
+          - src/web/components/LineageView.css
+          - src/web/components/LineageView.test.ts
+          - src/web/components/LineageAssetNode.tsx
+          - src/web/components/LineageAssetNode.test.tsx
+          - src/web/components/LineageSidePanel.tsx
+          - src/web/components/LineageSidePanel.test.tsx
+          - src/web/components/LineageHandoffPanel.tsx
+          - src/web/components/LineageHandoffPanel.test.ts
+          - src/web/components/LineageGenerationSheet.tsx
+          - src/web/components/LineageGenerationSheet.test.tsx
+          - src/web/components/LineageVariationPromptDialog.tsx
+          - src/web/components/LineageVariationPromptDialog.css
+          - src/web/components/LineageVariationPromptDialog.test.tsx
+          - e2e/canvas-variation-prompts.e2e.ts
+        verify:
+          - "git diff --check"
+          - "npm test -- src/server/assetLineage.test.ts src/server/lineageSelectionPacket.test.ts src/server/generationReceipts.test.ts src/cli/lineageCli.test.ts src/web/components/LineageVariationPromptDialog.test.tsx src/web/components/LineageAssetNode.test.tsx src/web/components/LineageSidePanel.test.tsx src/web/components/LineageGenerationSheet.test.tsx src/web/components/LineageView.test.ts"
+          - "npm run check"
+          - "npm run lint"
+          - "npm run build:web"
+          - "npm run e2e -- e2e/canvas-variation-prompts.e2e.ts"
+        stop_if:
+          - "A new database migration is required instead of backward-compatible notes/instructions aliases."
+          - "The implementation would start external provider work from the server or browser."
+          - "Prompt edits could overwrite a claimed or in-progress lineage task."
+          - "Need files outside allowed_files."
+          - "A required verify command fails twice for an in-scope cause."
+      evidence:
+        - "T001 receipt"
+        - "src/server/assetLineage.ts:updateSelectedAsset and markLineageRerollRequest"
+        - "src/server/assetLineageTasks.ts pending-task instruction protections"
+        - "src/server/generationReceipts.ts codex-handoff guardrails"
+        - "src/web/components/LineageSidePanel.tsx current rationale and task queue UX"
+      subgoal_contract: null
+      parallel_safety: null
+      blocked_tasks: []
+      missing_evidence:
+        - "Desktop and narrow browser proof after implementation"
+        - "Profile-scoped CLI selection/reroll/task/generation proof after implementation"
+      required_board_updates:
+        - "Copy worker_package onto T003 and activate it."
+        - "After T003, mark T004 done only if a safe authenticated Codex wake transport is found; otherwise block it with the repository evidence and preserve durable queue semantics."
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: high
+    objective: "Implement the full persisted Canvas variation-prompt vertical slice for branch and reroll: prompt composer, edit/review affordances on nodes and selection panel, backward-compatible storage aliases, task/packet/brief/handoff projection, and saved-prompt planning defaults."
+    allowed_files:
+      - "src/shared/types.ts"
+      - "src/shared/lineageSelectionPacketTypes.ts"
+      - "src/shared/generationTypes.ts"
+      - "src/server/assetLineage.ts"
+      - "src/server/assetLineage.test.ts"
+      - "src/server/assetLineageHandoff.ts"
+      - "src/server/lineageSelectionPacket.ts"
+      - "src/server/lineageSelectionPacket.test.ts"
+      - "src/server/generationReceipts.ts"
+      - "src/server/generationReceipts.test.ts"
+      - "src/cli/lineageCli.ts"
+      - "src/cli/lineageCli.test.ts"
+      - "src/web/components/LineageView.tsx"
+      - "src/web/components/LineageView.css"
+      - "src/web/components/LineageView.test.ts"
+      - "src/web/components/LineageAssetNode.tsx"
+      - "src/web/components/LineageAssetNode.test.tsx"
+      - "src/web/components/LineageSidePanel.tsx"
+      - "src/web/components/LineageSidePanel.test.tsx"
+      - "src/web/components/LineageHandoffPanel.tsx"
+      - "src/web/components/LineageHandoffPanel.test.ts"
+      - "src/web/components/LineageGenerationSheet.tsx"
+      - "src/web/components/LineageGenerationSheet.test.tsx"
+      - "src/web/components/LineageVariationPromptDialog.tsx"
+      - "src/web/components/LineageVariationPromptDialog.css"
+      - "src/web/components/LineageVariationPromptDialog.test.tsx"
+      - "e2e/canvas-variation-prompts.e2e.ts"
+    verify:
+      - "git diff --check"
+      - "npm test -- src/server/assetLineage.test.ts src/server/lineageSelectionPacket.test.ts src/server/generationReceipts.test.ts src/cli/lineageCli.test.ts src/web/components/LineageVariationPromptDialog.test.tsx src/web/components/LineageAssetNode.test.tsx src/web/components/LineageSidePanel.test.tsx src/web/components/LineageGenerationSheet.test.tsx src/web/components/LineageView.test.ts"
+      - "npm run check"
+      - "npm run lint"
+      - "npm run build:web"
+      - "npm run e2e -- e2e/canvas-variation-prompts.e2e.ts"
+    stop_if:
+      - "A new database migration is required instead of backward-compatible notes/instructions aliases."
+      - "The implementation would start external provider work from the server or browser."
+      - "Prompt edits could overwrite a claimed or in-progress lineage task."
+      - "Need files outside allowed_files."
+      - "A required verify command fails twice for an in-scope cause."
+    receipt:
+      result: done
+      changed_files:
+        - src/shared/types.ts
+        - src/shared/lineageSelectionPacketTypes.ts
+        - src/shared/generationTypes.ts
+        - src/server/assetLineage.ts
+        - src/server/assetLineage.test.ts
+        - src/server/assetLineageHandoff.ts
+        - src/server/lineageSelectionPacket.ts
+        - src/server/lineageSelectionPacket.test.ts
+        - src/server/generationReceipts.ts
+        - src/web/components/LineageView.tsx
+        - src/web/components/LineageView.css
+        - src/web/components/LineageAssetNode.tsx
+        - src/web/components/LineageAssetNode.test.tsx
+        - src/web/components/LineageSidePanel.tsx
+        - src/web/components/LineageHandoffPanel.tsx
+        - src/web/components/LineageGenerationSheet.tsx
+        - src/web/components/LineageGenerationSheet.test.tsx
+        - src/web/components/LineageVariationPromptDialog.tsx
+        - src/web/components/LineageVariationPromptDialog.css
+        - src/web/components/LineageVariationPromptDialog.test.tsx
+        - e2e/canvas-variation-prompts.e2e.ts
+      commands:
+        - cmd: "git diff --check"
+          status: pass
+        - cmd: "npm test -- src/server/assetLineage.test.ts src/server/lineageSelectionPacket.test.ts src/server/generationReceipts.test.ts src/cli/lineageCli.test.ts src/web/components/LineageVariationPromptDialog.test.tsx src/web/components/LineageAssetNode.test.tsx src/web/components/LineageSidePanel.test.tsx src/web/components/LineageGenerationSheet.test.tsx src/web/components/LineageView.test.ts"
+          status: pass
+        - cmd: "npm run check"
+          status: pass
+        - cmd: "npm run lint"
+          status: pass
+        - cmd: "npm run build:web"
+          status: pass
+        - cmd: "npm run e2e -- e2e/canvas-variation-prompts.e2e.ts"
+          status: pass
+      summary: "Implemented a focused branch/re-roll prompt composer, durable prompt aliases over the existing notes/task-instruction storage, persistent node previews, selection-panel editing, packet/brief/generation-handoff projections, and branch-planner prefill. New Canvas actions queue the existing profile-scoped iterate/reroll tasks with exact prompts; no database migration or provider call was added. The feature E2E proves UI entry, reload persistence, node visibility, task instructions, and Codex brief access."
+      deviations:
+        - "No database migration: existing notes columns remain the physical compatibility storage while typed prompt aliases define the product contract."
+        - "No external Codex wake transport was implemented; Lineage queues durable claimable tasks and stays honest about the boundary."
+      remaining_blockers:
+        - "e2e/public-smoke.e2e.ts must be updated in a separate allowed-file task because its immediate-toggle expectation is intentionally obsolete."
+      verification_attempts: 2
+      stopped_because: null
+  - id: T004
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Audit whether an authenticated direct Canvas-to-Codex wake transport exists and approve durable task queueing as the truthful boundary when it does not."
+    inputs:
+      - "T001 feasibility evidence"
+      - "T003 implementation and direct-queue UX"
+      - "Generation handoff guardrails"
+    constraints:
+      - "Read-only."
+      - "Do not claim an external Codex session started without a repository-backed authenticated transport and inspectable status."
+    expected_output:
+      - "direct wake feasible now | safely deferred"
+      - "Evidence"
+      - "Required product wording or follow-up"
+    receipt:
+      result: done
+      decision: approved
+      full_outcome_complete: false
+      rationale: "Direct authenticated wake-up of a specific Codex desktop task is safely deferred. The repository exposes no Codex task address, send API, callback status, or authenticated wake transport. Its generation provider is deliberately `codex-handoff`; handoff guardrails declare `live_generation:false` and `external_services:false`, and instructions require image generation outside the Lineage server. The implemented Canvas action already performs the strongest truthful local connection: it creates a durable, profile-scoped, claimable iterate/reroll task with the exact saved prompt and labels it ready for Codex. Product copy does not claim that external work has started."
+      worker_package: null
+      evidence:
+        - "src/server/generationReceipts.ts provider and guardrails"
+        - "src/server/assetLineageTasks.ts durable task claim/start lifecycle"
+        - "src/server/lineageTaskRoutes.ts local task routes"
+        - "src/web/components/LineageVariationPromptDialog.tsx ready-for-Codex wording"
+        - "T001 and T003 receipts"
+      subgoal_contract: null
+      parallel_safety: null
+      blocked_tasks: []
+      missing_evidence:
+        - "A future authenticated Codex task transport would need an explicit destination identity, consent action, delivery receipt, and running/completed status callback before Lineage can say work began."
+      required_board_updates:
+        - "Keep direct wake as a follow-up integration opportunity, not a release blocker for durable queueing and handoff."
+  - id: T005
+    type: worker
+    assignee: Worker
+    status: done
+    reasoning_hint: medium
+    objective: "Update the existing public Canvas acceptance test for the intentional prompt-before-queue interaction and prove both legacy smoke coverage and the new prompt flow."
+    allowed_files:
+      - "e2e/public-smoke.e2e.ts"
+    verify:
+      - "git diff --check"
+      - "npm run e2e -- e2e/public-smoke.e2e.ts e2e/canvas-variation-prompts.e2e.ts"
+    stop_if:
+      - "The product implementation must change to satisfy the acceptance test."
+      - "Need files outside allowed_files."
+      - "The verify command fails twice for an in-scope cause."
+    receipt:
+      result: done
+      changed_files:
+        - e2e/public-smoke.e2e.ts
+      commands:
+        - cmd: "git diff --check"
+          status: pass
+        - cmd: "npm run e2e -- e2e/public-smoke.e2e.ts e2e/canvas-variation-prompts.e2e.ts"
+          status: pass
+      summary: "Updated the canonical Canvas smoke flow to enter an explicit prompt before queueing branch and re-roll work, then preserved its keyboard-toggle assertions. The legacy public smoke suite and the new persistence/Codex-handoff E2E now pass together: seven browser tests."
+      deviations: []
+      remaining_blockers: []
+      verification_attempts: 1
+      stopped_because: null
+  - id: T006
+    type: pm
+    assignee: PM
+    status: done
+    reasoning_hint: high
+    objective: "Run the verified checkout-dev identity gate and capture desktop plus narrow-screen browser evidence of the prompt composer, persisted node prompt, and Codex-ready task state."
+    inputs:
+      - "T003 implementation"
+      - "T005 browser acceptance coverage"
+    constraints:
+      - "Use a dedicated development profile for this exact worktree."
+      - "Stop and repin before any checkout fingerprint change."
+      - "Do not mutate stable or preview profiles/databases."
+    expected_output:
+      - "Runtime/profile/database/service identity receipt"
+      - "Desktop screenshot"
+      - "Narrow screenshot"
+      - "Adversarial visual findings"
+    receipt:
+      result: done
+      summary: "Verified the exact fresh-main checkout through the dedicated canvas-variation-prompts-proof development profile and managed service, then exercised the Swissifier demo in the in-app browser. The desktop modal and 390x844 bottom sheet both present a compact prompt-first interaction. A branch prompt was queued, the page was reloaded, and the identical text remained visible on the node and in the pending iterate task for Codex."
+      evidence:
+        - "runtime doctor: dev checkout /Users/neonwatty/.codex/worktrees/lineage-canvas-variation-prompts, origin main ancestor 1a4e144ce24debbd972b558d96301c3e042c04ad, verified code fingerprint dc1383086e6396a645c4bbd3c791fd866fe64ed35e46e2902db017c281d914a6"
+        - "profile doctor: canvas-variation-prompts-proof, profile fingerprint e579e3cf, exact checkout/service/database identity match"
+        - "db info: /Users/neonwatty/Library/Application Support/Lineage/profiles/canvas-variation-prompts-proof/lineage.sqlite"
+        - "managed dev service healthy at http://127.0.0.1:52841 with matching /api/runtime identity"
+        - /Users/neonwatty/.codex/visualizations/2026/07/30/019fb553-c7d3-7370-b705-cf31ddaa2e0d/canvas-variation-prompt-desktop.png
+        - /Users/neonwatty/.codex/visualizations/2026/07/30/019fb553-c7d3-7370-b705-cf31ddaa2e0d/canvas-variation-prompt-narrow.png
+        - /Users/neonwatty/.codex/visualizations/2026/07/30/019fb553-c7d3-7370-b705-cf31ddaa2e0d/canvas-variation-prompt-persisted-selection.png
+        - "Browser DOM after reload contained the exact prompt and a pending iterate task; Manage selection exposed the same prompt in the task instruction textbox."
+      commands:
+        - cmd: "npm run e2e -- e2e/public-smoke.e2e.ts e2e/canvas-variation-prompts.e2e.ts"
+          status: pass
+        - cmd: "verified checkout-dev runtime/profile/db/service identity gate for canvas-variation-prompts-proof"
+          status: pass
+        - cmd: "desktop, 390x844, reload, node prompt, and pending Codex task browser inspection"
+          status: pass
+      adversarial_findings:
+        - "The prompt card remains compact on desktop and becomes a usable bottom sheet on a 390x844 viewport; no oversized empty header area appeared."
+        - "The first full-canvas persisted screenshot made the node text too small to inspect, so a second screenshot opened Manage selection and focused the exact queued task prompt after reload."
+        - "The UI says ready for Codex and pending; it never claims that an external Codex desktop task has already started."
+      harness: codex
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    reasoning_hint: high
+    objective: "Audit the full user outcome against fresh-main ancestry, persisted branch/reroll prompt behavior, Codex handoff, direct-send disposition, and adversarial browser/runtime proof."
+    inputs:
+      - "All done and blocked task receipts"
+      - "Full goal oracle evidence"
+      - "Current git ancestry and dirty diff"
+    constraints:
+      - "Read-only."
+      - "Reject completion if prompts are browser-only, not visible after reload, or absent from Codex planning."
+      - "Reject completion if existing landing/walkthrough branches were modified."
+      - "Require direct-send behavior or a technically evidenced safe deferral."
+    expected_output:
+      - "complete | not_complete"
+      - "full_outcome_complete: true | false"
+      - "Evidence mapped to user-facing claims"
+      - "Top three realistic failure modes and their proof"
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      rationale: "The fresh origin/main worktree now delivers the complete truthful local vertical slice: exact branch and re-roll prompts are required for new Canvas actions, durably persisted through existing profile-scoped records and pending task instructions, visible on nodes and management surfaces after reload, and projected into selection packets, briefs, handoffs, and planner defaults for Codex. Existing landing/walkthrough worktrees remain separate. A direct authenticated wake of a particular Codex desktop task remains safely deferred because no destination, consent, receipt, or callback transport exists; the UX accurately queues work as ready for Codex without claiming it started externally."
+      worker_package: null
+      evidence:
+        - "HEAD and freshly fetched origin/main were both 1a4e144ce24debbd972b558d96301c3e042c04ad before the feature commit; current branch is codex/canvas-variation-prompts in its own worktree."
+        - "git worktree list shows codex/home-landing, codex/home-swissifier-wizard, and codex/swissifier-walkthrough-polish at their own unchanged heads."
+        - "src/server/assetLineage.ts projects asset_selections.notes as branch_prompt and asset_reroll_requests.notes as prompt; pending iterate/reroll task instructions use the same exact text."
+        - "src/server/lineageSelectionPacket.ts, src/server/assetLineageHandoff.ts, and src/server/generationReceipts.ts expose saved prompts to Codex packets, briefs, and per-source generation handoffs."
+        - "src/web/components/LineageVariationPromptDialog.tsx requires the prompt before queueing, while LineageAssetNode.tsx and LineageSidePanel.tsx keep it visible and editable."
+        - "e2e/canvas-variation-prompts.e2e.ts proves distinct branch/re-roll entry, reload persistence, snapshot aliases, node visibility, pending task instructions, and brief access."
+        - "A second uninterrupted npm run ci passed exit 0: 97 Vitest files / 762 passing tests, 34/34 browser tests, runtime isolation/oracle, public readiness, package/plugin smoke, and audit with 0 vulnerabilities."
+        - "Dedicated canvas-variation-prompts-proof runtime/profile/db/service identities matched, and browser evidence covers desktop, 390x844, reload, and the persisted pending Codex task."
+      top_failure_modes:
+        - risk: "Prompts appear in the browser but disappear on reload or never reach Codex."
+          proof: "Server persistence tests, the feature E2E reload, live browser reload, selection-packet/brief assertions, and the persisted task-instruction screenshot all retain the exact prompt."
+        - risk: "Branch and re-roll intent are conflated, causing the wrong image variation prompt to be executed."
+          proof: "They remain distinct physical records and typed aliases; the E2E saves different prompts to different nodes and asserts branch_prompt versus reroll_request.prompt, while generation handoffs carry per-source prompts."
+        - risk: "Canvas falsely claims it woke Codex or started generation when no authenticated transport exists."
+          proof: "Generation guardrails remain codex-handoff with live_generation:false and external_services:false; UI wording is Saved to Canvas / ready for Codex and pending, and the direct-wake audit documents the missing destination, consent, delivery receipt, and status callback."
+      subgoal_contract: null
+      parallel_safety: null
+      blocked_tasks: []
+      missing_evidence: []
+      required_board_updates:
+        - "Mark T999 done, clear active_task, and set goal.status done."
+      harness: codex-pm-fallback-after-goal-judge-timeout
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: unknown
+    task: null
+    commands: []

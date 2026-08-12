@@ -1,4 +1,4 @@
-import type { LineageEdgeWeight } from '../lineagePreferences';
+import type { LineageEdgeWeight, LineagePreviewAction, LineagePreviewActionVisibility } from '../lineagePreferences';
 import type { LineageCanvasPresentation } from './LineageAssetNode';
 import type { LineageGraphDirection } from './lineageGraph';
 
@@ -147,6 +147,12 @@ export function LineageCanvasAppearanceControls({
   hoverPreviewsEnabled,
   loading,
   minimapVisible,
+  nextVariationLimit,
+  variationPromptAutoEdit,
+  branchPromptOnMark,
+  rerollPromptOnMark,
+  discussionNotePrompt,
+  previewActions,
   onCanvasPresentation,
   onEdgeSummariesVisible,
   onEdgeWeight,
@@ -154,6 +160,12 @@ export function LineageCanvasAppearanceControls({
   onGraphDirection,
   onHoverPreviewsEnabled,
   onMinimapVisible,
+  onNextVariationLimit,
+  onVariationPromptAutoEdit,
+  onBranchPromptOnMark,
+  onRerollPromptOnMark,
+  onDiscussionNotePrompt,
+  onPreviewAction,
   onResetAppearance,
   onTidyGraph,
   snapshotAvailable,
@@ -165,6 +177,12 @@ export function LineageCanvasAppearanceControls({
   hoverPreviewsEnabled: boolean;
   loading: boolean;
   minimapVisible: boolean;
+  nextVariationLimit: number;
+  variationPromptAutoEdit: boolean;
+  branchPromptOnMark: boolean;
+  rerollPromptOnMark: boolean;
+  discussionNotePrompt: boolean;
+  previewActions: LineagePreviewActionVisibility;
   onCanvasPresentation: (presentation: LineageCanvasPresentation) => void;
   onEdgeSummariesVisible: (visible: boolean) => void;
   onEdgeWeight: (weight: LineageEdgeWeight) => void;
@@ -172,6 +190,12 @@ export function LineageCanvasAppearanceControls({
   onGraphDirection: (direction: LineageGraphDirection) => void;
   onHoverPreviewsEnabled: (enabled: boolean) => void;
   onMinimapVisible: (visible: boolean) => void;
+  onNextVariationLimit: (limit: number) => void;
+  onVariationPromptAutoEdit: (enabled: boolean) => void;
+  onBranchPromptOnMark: (enabled: boolean) => void;
+  onRerollPromptOnMark: (enabled: boolean) => void;
+  onDiscussionNotePrompt: (enabled: boolean) => void;
+  onPreviewAction: (action: LineagePreviewAction, enabled: boolean) => void;
   onResetAppearance: () => void;
   onTidyGraph: () => void;
   snapshotAvailable: boolean;
@@ -274,6 +298,28 @@ export function LineageCanvasAppearanceControls({
         />
         </section>
 
+        <section aria-labelledby="canvas-settings-workflow" className="lineage-canvas-settings-group">
+        <div className="lineage-canvas-settings-group-head">
+          <span aria-hidden="true">⑂</span>
+          <div>
+            <h4 id="canvas-settings-workflow">Workflow</h4>
+            <p>Keep the variation queue focused for this workspace.</p>
+          </div>
+        </div>
+        <label className="lineage-setting-number">
+          <span><strong>Maximum queued branches</strong><small>New branches pause when this workspace reaches the limit</small></span>
+          <input
+            aria-label="Maximum queued branches"
+            disabled={disabled}
+            max={12}
+            min={1}
+            onChange={event => onNextVariationLimit(Number(event.target.value))}
+            type="number"
+            value={nextVariationLimit}
+          />
+        </label>
+        </section>
+
         <section aria-labelledby="canvas-settings-view-aids" className="lineage-canvas-settings-group">
         <div className="lineage-canvas-settings-group-head">
           <span aria-hidden="true">⌖</span>
@@ -308,6 +354,65 @@ export function LineageCanvasAppearanceControls({
           label="Hover previews"
           onChange={onHoverPreviewsEnabled}
         />
+        <SettingSwitch
+          ariaLabel="Edit prompt when selecting a variation"
+          checked={variationPromptAutoEdit}
+          description="Open the inline prompt editor when you choose a queued variation"
+          disabled={!snapshotAvailable}
+          label="Edit prompt when selecting a variation"
+          onChange={onVariationPromptAutoEdit}
+        />
+        <SettingSwitch
+          ariaLabel="Ask for a Branch prompt when marking"
+          checked={branchPromptOnMark}
+          description="Open the prompt editor before marking a card for Branch"
+          disabled={!snapshotAvailable}
+          label="Ask for Branch prompt"
+          onChange={onBranchPromptOnMark}
+        />
+        <SettingSwitch
+          ariaLabel="Ask for a Re-roll prompt when marking"
+          checked={rerollPromptOnMark}
+          description="Open the prompt editor before marking a card for Re-roll"
+          disabled={!snapshotAvailable}
+          label="Ask for Re-roll prompt"
+          onChange={onRerollPromptOnMark}
+        />
+        <SettingSwitch
+          ariaLabel="Ask for a note when flagging for discussion"
+          checked={discussionNotePrompt}
+          description="Offer an optional note before adding a discussion flag"
+          disabled={!snapshotAvailable}
+          label="Ask for a note when flagging for discussion"
+          onChange={onDiscussionNotePrompt}
+        />
+        </section>
+
+        <section aria-labelledby="canvas-settings-preview-actions" className="lineage-canvas-settings-group">
+        <div className="lineage-canvas-settings-group-head">
+          <span aria-hidden="true">⌨</span>
+          <div>
+            <h4 id="canvas-settings-preview-actions">Preview actions</h4>
+            <p>Choose which shortcut buttons appear beneath a hover preview. Active states remain visible on cards.</p>
+          </div>
+        </div>
+        {([
+          ['branch', 'Branch', 'B'],
+          ['reroll', 'Re-roll', 'R'],
+          ['social', 'Social', 'S'],
+          ['flag', 'Flag for discussion', 'F'],
+          ['details', 'Details', 'D'],
+        ] as const).map(([action, label, shortcut]) => (
+          <SettingSwitch
+            ariaLabel={`Show ${label} in hover preview`}
+            checked={previewActions[action]}
+            description={`Show the ${shortcut} shortcut button`}
+            disabled={!snapshotAvailable}
+            key={action}
+            label={label}
+            onChange={enabled => onPreviewAction(action, enabled)}
+          />
+        ))}
         </section>
       </div>
 

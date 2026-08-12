@@ -1,0 +1,114 @@
+.project-breadcrumb {
+  margin-bottom: 22px;
+}
+
+.project-breadcrumb button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #41616b;
+  padding: 7px 8px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.project-breadcrumb button:hover,
+.project-breadcrumb button:focus-visible {
+  background: #e7f1f3;
+  color: #087f8c;
+}
+
+.workspace-lifecycle-tabs {
+  display: inline-flex;
+  gap: 3px;
+  margin-bottom: 14px;
+  border: 1px solid #d8e2e5;
+  border-radius: 11px;
+  background: #edf3f5;
+  padding: 4px;
+}
+
+.workspace-lifecycle-tabs button {
+  min-width: 94px;
+  min-height: 36px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #60747b;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.workspace-lifecycle-tabs button[aria-selected="true"] {
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(20, 43, 51, 0.1);
+  color: #087f8c;
+}
+
+.workspace-status {
+  display: inline-block;
+  margin-bottom: 4px;
+  border-radius: 999px;
+  padding: 3px 7px;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.workspace-status-active {
+  background: #e2f5ed;
+  color: #237053;
+}
+
+.workspace-status-paused {
+  background: #fff2d9;
+  color: #8a5a0b;
+}
+
+.workspace-status-archived {
+  background: #edf0f2;
+  color: #617079;
+}
+
+.workspace-secondary-id {
+  max-width: 300px;
+}
+
+.workspace-item-actions > div {
+  display: flex;
+  gap: 6px;
+}
+
+.organization-state-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+@media (max-width: 520px) {
+  .workspace-lifecycle-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .workspace-item-actions > div {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .workspace-item-actions > .primary-button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 340px) {
+  .workspace-item-actions > div {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

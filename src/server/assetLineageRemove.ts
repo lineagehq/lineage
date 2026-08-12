@@ -1,7 +1,7 @@
 import { lineageDb as db, nowIso, type DatabaseSync } from './assetLineageDb';
 import { selectedRows, selectionId } from './assetLineageSelection';
 import { cancelLineageIterateTasksForAssets } from './assetLineageTasks';
-import { getLineageSnapshot, LineageError } from './assetLineage';
+import { assertWorkspaceRootAcceptsWrites, getLineageSnapshot, LineageError } from './assetLineage';
 import { requireLineageWorkspaceClaimForWrite } from './lineageClaimGuards';
 import type { LineageRemoveNodeFields, LineageRemoveNodeResponse } from '../shared/types';
 
@@ -56,6 +56,7 @@ export function removeLineageNode(project: string, fields: LineageRemoveNodeFiel
   requireAsset(database, project, fields.assetId);
   const root = fields.rootAssetId || rootFor(database, project, fields.assetId);
   requireAsset(database, project, root);
+  assertWorkspaceRootAcceptsWrites(database, project, root);
   if (fields.assetId === root) {
     database.close();
     throw new LineageError('Cannot remove the root lineage node; archive the workspace or create a new root instead.');
@@ -125,6 +126,11 @@ export function removeLineageNode(project: string, fields: LineageRemoveNodeFiel
     database.prepare('delete from asset_layouts where project_id = ? and root_asset_id = ? and asset_id = ?').run(project, root, fields.assetId);
     database.prepare(`
       update asset_social_marks
+      set unmarked_by = 'lineage:remove-node', unmarked_at = ?, updated_at = ?
+      where project_id = ? and root_asset_id = ? and asset_id = ? and unmarked_at is null
+    `).run(timestamp, timestamp, project, root, fields.assetId);
+    database.prepare(`
+      update asset_discussion_marks
       set unmarked_by = 'lineage:remove-node', unmarked_at = ?, updated_at = ?
       where project_id = ? and root_asset_id = ? and asset_id = ? and unmarked_at is null
     `).run(timestamp, timestamp, project, root, fields.assetId);

@@ -23,6 +23,7 @@ interface LineageSelectionPacketWorkspace {
 
 interface LineageSelectionPacketSelectedItem {
   asset_id: string;
+  branch_prompt?: string;
   position: number;
   selected_at: string;
   selection_note?: string;
@@ -64,6 +65,7 @@ export interface LineageSelectionPacketV2Attempt extends LineageSelectionPacketA
 
 export interface LineageSelectionPacketAsset {
   asset_id: string;
+  branch_prompt?: string;
   campaign?: string;
   channel?: string;
   checksum_sha256?: string;
@@ -163,6 +165,7 @@ export interface LineageSelectionPacketV2IdentityProjection {
   schema_version: 'lineage.selection_packet.v2';
   selection: Array<{
     asset_id: string;
+    branch_prompt?: string;
     campaign?: string;
     channel?: string;
     current_attempt: Pick<LineageSelectionPacketV2Attempt, 'asset_id' | 'attempt_index' | 'checksum_sha256' | 'id' | 'source'>;
@@ -191,6 +194,7 @@ export interface LineageSelectionPacketV3IdentityProjection {
   selected_source_resolution_digest_sha256: string;
   selection: Array<{
     asset_id: string;
+    branch_prompt?: string;
     campaign?: string;
     channel?: string;
     current_attempt: Pick<LineageSelectionPacketV2Attempt, 'asset_id' | 'attempt_index' | 'checksum_sha256' | 'id' | 'source'>;

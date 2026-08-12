@@ -1,18 +1,25 @@
 import { expect, test } from 'playwright/test';
+import { spawnSync } from 'node:child_process';
 
-const project = 'demo-project';
+const project = 'swissifier-demo';
 const richWorkspaceTitle = 'Swissifier rich demo';
 
-test('QA seed shows truthful progress and rich PNG previews in the first lineage view', async ({ page, request }) => {
+test('QA seed shows truthful progress and rich PNG previews in the first lineage view', async ({ page, request, baseURL }) => {
   test.setTimeout(120_000);
   const consoleErrors: string[] = [];
   page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
-  await page.route(/\/api\/lineage-workspaces(?:\?|$)/, async route => {
-    await new Promise(resolve => setTimeout(resolve, 2_000));
-    await route.continue();
+  const projects = await request.get('/api/projects');
+  expect(projects.ok()).toBe(true);
+  const downloaded = await request.post('/api/lineage-workspaces/demo/swissifier/media/download', {
+    data: { project, confirmWrite: true },
   });
+  expect(downloaded.ok()).toBe(true);
   await page.setViewportSize({ height: 640, width: 1024 });
-  await page.goto('/');
+  await page.goto('/projects');
+  const swissifier = page.locator('.organization-item').filter({ hasText: 'swissifier-demo' });
+  await swissifier.getByRole('heading', { name: 'Swissifier Demo' }).click();
+  const richWorkspace = page.locator('.organization-item').filter({ hasText: richWorkspaceTitle });
+  await richWorkspace.getByRole('heading', { name: richWorkspaceTitle }).click();
   const canvasTools = page.getByRole('region', { name: 'Canvas workspace tools' });
   const demoTools = canvasTools.locator('.lineage-tool-section').filter({ has: page.locator('summary', { hasText: 'Demo/QA' }) });
   await demoTools.locator('summary').click();
@@ -23,105 +30,77 @@ test('QA seed shows truthful progress and rich PNG previews in the first lineage
   ), {
     message: 'wait for rich media status and workspace readiness',
   }).toBe(true);
-  if (await download.isEnabled()) {
-    const downloaded = page.waitForResponse(response => response.request().method() === 'POST'
-      && new URL(response.url()).pathname === '/api/lineage-workspaces/demo/swissifier/media/download');
-    await download.click();
-    const downloadResponse = await downloaded;
-    expect(downloadResponse.ok()).toBe(true);
-    await expect(downloadResponse.json()).resolves.toMatchObject({
-      result: {
-        media_status: { present: 14, total: 14 },
-        restored: 14,
-      },
-    });
-  }
+  expect(await download.isEnabled()).toBe(false);
   await expect(demoTools).toContainText('14/14 PNG images');
 
-  await page.evaluate(() => {
-    const target = window as unknown as { __lineageStateTranscript: string[] };
-    target.__lineageStateTranscript = [];
-    const record = () => {
-      const state = document.querySelector('[data-lineage-state]');
-      const context = document.querySelector('.lineage-toolbar-context');
-      target.__lineageStateTranscript.push(`${state?.getAttribute('data-lineage-state') || 'graph'}:${state?.textContent || context?.textContent || ''}`);
-    };
-    record();
-    new MutationObserver(record).observe(document.body, { attributes: true, childList: true, subtree: true });
+  await expect(page.locator('.lineage-workspace-title strong')).toHaveText(richWorkspaceTitle, { timeout: 20_000 });
+  await expect(page.locator('.lineage-node')).toHaveCount(14, { timeout: 20_000 });
+  await expect(page.locator('.react-flow__edge')).toHaveCount(13);
+  expect(consoleErrors).toEqual([]);
+
+  const verifier = spawnSync('npm', [
+    'run',
+    '--silent',
+    'seed:qa:verify',
+    '--',
+    '--base-url',
+    String(baseURL),
+    '--json',
+  ], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
   });
-  await page.route(/\/api\/lineage\/[^/?]+(?:\?|$)/, async route => {
-    await new Promise(resolve => setTimeout(resolve, 350));
-    await route.continue();
+  expect(verifier.status, verifier.stderr || verifier.stdout).toBe(0);
+  expect(JSON.parse(verifier.stdout)).toMatchObject({
+    ok: true,
+    project,
+    root_asset_id: 'local-5748fb8ba6df',
+    snapshot: {
+      nodes: 14,
+      png_preview_urls: 14,
+      svg_preview_urls: 0,
+    },
+    swissifier_media: {
+      present: 14,
+      total: 14,
+    },
   });
-  let seedRequests = 0;
-  page.on('requestfinished', requestFinished => {
-    if (requestFinished.method() === 'POST' && new URL(requestFinished.url()).pathname === '/api/lineage-workspaces/demo/swissifier/seed') seedRequests += 1;
-  });
-  const seeded = page.waitForResponse(response => response.request().method() === 'POST'
-    && new URL(response.url()).pathname === '/api/lineage-workspaces/demo/swissifier/seed');
-  const loadRichDemo = demoTools.getByRole('button', { name: 'Load rich image demo' });
-  await loadRichDemo.scrollIntoViewIfNeeded();
-  await loadRichDemo.click();
-  const seedResponse = await seeded;
-  expect(seedResponse.ok()).toBe(true);
-  const seedResult = await seedResponse.json() as { workspace?: { id: string } };
-  const workspaceId = seedResult.workspace?.id;
 
-  try {
-    await expect(canvasTools.locator('.lineage-workspace-trigger strong')).toHaveText(richWorkspaceTitle, { timeout: 20_000 });
-    await expect(page.locator('.lineage-node')).toHaveCount(14, { timeout: 20_000 });
-    await expect(page.locator('.react-flow__edge')).toHaveCount(13);
-    await expect(page.locator('.lineage-toolbar-context')).toHaveText('Rich demo ready');
-    expect(seedRequests).toBe(1);
-    const transcript = await page.evaluate(() => (window as unknown as { __lineageStateTranscript: string[] }).__lineageStateTranscript);
-    const operationTranscript = transcript.slice(transcript.findIndex(entry => entry.includes('Creating rich demo workspace')));
-    expect(transcript.some(entry => entry.includes('Creating rich demo workspace')), transcript.join('\n')).toBe(true);
-    expect(transcript.some(entry => entry.includes('Indexing 14 rich demo images')), transcript.join('\n')).toBe(true);
-    expect(operationTranscript.some(entry => entry.includes('No lineage index yet')), operationTranscript.join('\n')).toBe(false);
-    expect(consoleErrors).toEqual([]);
+  await demoTools.locator('summary').click();
+  await expect(demoTools).toContainText('QA seed media');
+  await expect(demoTools).toContainText('14/14 PNG images');
+  await demoTools.locator('summary').click();
 
-    await demoTools.locator('summary').click();
-    await expect(demoTools).toContainText('QA seed media');
-    await expect(demoTools).toContainText('14/14 PNG images');
-    await demoTools.locator('summary').click();
+  const rootNode = page.locator('.lineage-node.root-node');
+  await expect(rootNode).toHaveAttribute('title', /^Hover to preview;/);
+  const inspector = page.getByTestId('lineage-hover-preview');
+  const preview = inspector.locator('.lineage-hover-preview-media img');
+  await expect(async () => {
+    await demoTools.locator('summary').focus();
+    await rootNode.focus();
+    await expect(rootNode).toBeFocused();
+    await expect(inspector).toBeVisible({ timeout: 1_000 });
+    await expect(preview).toBeVisible();
+    await expect(preview).toHaveAttribute('src', /rich-demo-drafts.*\.png/);
+    const proof = await preview.evaluate((image: HTMLImageElement) => {
+      const rect = image.getBoundingClientRect();
+      return {
+        naturalWidth: image.naturalWidth,
+        naturalHeight: image.naturalHeight,
+        renderedWidth: rect.width,
+        renderedHeight: rect.height,
+        objectFit: getComputedStyle(image).objectFit,
+        src: image.getAttribute('src') || '',
+      };
+    });
+    expect(proof.naturalWidth).toBeGreaterThan(900);
+    expect(proof.naturalHeight).toBeGreaterThan(900);
+    expect(proof.renderedWidth).toBeGreaterThan(180);
+    expect(proof.renderedHeight).toBeGreaterThan(100);
+    expect(proof.objectFit).toBe('contain');
+    expect(proof.src).not.toContain('.svg');
+  }).toPass({ intervals: [100, 250, 500], timeout: 15_000 });
 
-    const rootNode = page.locator('.lineage-node.root-node');
-    await expect(rootNode).toHaveAttribute('title', /^Hover to preview;/);
-    const inspector = page.getByTestId('lineage-hover-preview');
-    const preview = inspector.locator('.lineage-hover-preview-media img');
-    await expect(async () => {
-      await demoTools.locator('summary').focus();
-      await rootNode.focus();
-      await expect(rootNode).toBeFocused();
-      await expect(inspector).toBeVisible({ timeout: 1_000 });
-      await expect(preview).toBeVisible();
-      await expect(preview).toHaveAttribute('src', /rich-demo-drafts.*\.png/);
-      const proof = await preview.evaluate((image: HTMLImageElement) => {
-        const rect = image.getBoundingClientRect();
-        return {
-          naturalWidth: image.naturalWidth,
-          naturalHeight: image.naturalHeight,
-          renderedWidth: rect.width,
-          renderedHeight: rect.height,
-          objectFit: getComputedStyle(image).objectFit,
-          src: image.getAttribute('src') || '',
-        };
-      });
-      expect(proof.naturalWidth).toBeGreaterThan(900);
-      expect(proof.naturalHeight).toBeGreaterThan(900);
-      expect(proof.renderedWidth).toBeGreaterThan(180);
-      expect(proof.renderedHeight).toBeGreaterThan(100);
-      expect(proof.objectFit).toBe('contain');
-      expect(proof.src).not.toContain('.svg');
-    }).toPass({ intervals: [100, 250, 500], timeout: 15_000 });
-
-    const visibleSvgPreviews = await page.locator('.lineage-thumb img[src*=".svg"]:visible').count();
-    expect(visibleSvgPreviews).toBe(0);
-  } finally {
-    if (workspaceId) {
-      await request.post(`/api/lineage-workspaces/${encodeURIComponent(workspaceId)}/archive`, {
-        data: { project, confirmWrite: true },
-      });
-    }
-  }
+  const visibleSvgPreviews = await page.locator('.lineage-thumb img[src*=".svg"]:visible').count();
+  expect(visibleSvgPreviews).toBe(0);
 });

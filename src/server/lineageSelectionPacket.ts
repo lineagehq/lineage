@@ -159,6 +159,7 @@ function assetForNode(node: LineageNode, catalogAsset: GrowthAsset | undefined, 
 
   return {
     asset_id: node.asset_id,
+    branch_prompt: node.branch_prompt || node.selection_note,
     campaign: catalogAsset?.campaign || node.campaign,
     channel: catalogAsset?.channel || node.channel,
     checksum_sha256: checksum,
@@ -232,6 +233,7 @@ export function lineageSelectionPacketV2IdentityProjection(packet: LineageSelect
     }
     return {
       asset_id: item.asset_id,
+      branch_prompt: item.branch_prompt || item.selection_note,
       campaign: asset.campaign,
       channel: asset.channel,
       current_attempt: {
@@ -310,6 +312,7 @@ export function lineageSelectionPacketV3IdentityProjection(packet: LineageSelect
       }
       return {
         asset_id: item.asset_id,
+        branch_prompt: item.branch_prompt || item.selection_note,
         campaign: asset.campaign,
         channel: asset.channel,
         current_attempt: {
@@ -447,6 +450,7 @@ function assetForNodeV2(
 
   return {
     asset_id: node.asset_id,
+    branch_prompt: node.branch_prompt || node.selection_note,
     campaign: visibleCatalogAsset?.campaign || node.campaign,
     channel: visibleCatalogAsset?.channel || node.channel,
     checksum_sha256: currentAttempt.checksum_sha256,
@@ -492,6 +496,7 @@ function getLineageSelectionPacketV1(project: string, options: LineageSelectionP
   const nodeById = new Map(snapshot.nodes.map(node => [node.asset_id, node]));
   const selectedItems = snapshot.selections.map(selection => ({
     asset_id: selection.asset_id,
+    branch_prompt: selection.prompt || selection.notes,
     position: selection.position,
     selected_at: selection.selected_at,
     selection_note: selection.notes,
@@ -590,6 +595,7 @@ function getLineageSelectionPacketV2(project: string, options: LineageSelectionP
   const nodeById = new Map(snapshot.nodes.map(node => [node.asset_id, node]));
   const selectedItems = snapshot.selections.map(selection => ({
     asset_id: selection.asset_id,
+    branch_prompt: selection.prompt || selection.notes,
     position: selection.position,
     selected_at: selection.selected_at,
     selection_note: selection.notes,

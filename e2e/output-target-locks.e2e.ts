@@ -8,6 +8,8 @@ test('canvas persists independent node targets, plans only from their digest, an
   });
   expect(seededResponse.ok()).toBe(true);
   const seeded = await seededResponse.json() as { root_asset_id: string; workspace?: { id: string } };
+  const workspaceId = seeded.workspace?.id;
+  if (!workspaceId) throw new Error('Demo seed did not return an exact workspace ID');
 
   try {
     const snapshotResponse = await request.get(`/api/lineage/${seeded.root_asset_id}?project=${project}`);
@@ -30,9 +32,9 @@ test('canvas persists independent node targets, plans only from their digest, an
     });
     expect(selectionResponse.ok()).toBe(true);
 
-    await page.goto(`/?project=${project}`);
+    await page.goto(`/projects/${project}/workspaces/${encodeURIComponent(workspaceId)}`);
     const canvasTools = page.getByRole('region', { name: 'Canvas workspace tools' });
-    await expect(canvasTools.locator('.lineage-workspace-trigger strong')).toHaveText('Demo: Content iteration tree', { timeout: 20_000 });
+    await expect(page.locator('.lineage-workspace-title strong')).toHaveText('Demo: Content iteration tree', { timeout: 20_000 });
 
     await canvasTools.getByRole('button', { name: 'Output target defaults' }).click();
     const defaults = page.getByRole('dialog', { name: 'Output target defaults' });
@@ -46,6 +48,8 @@ test('canvas persists independent node targets, plans only from their digest, an
     const sourceCards = sheet.locator('.lineage-node-target-source');
     await expect(sourceCards).toHaveCount(2);
     await expect(sourceCards).toContainText(['Inherited next 1080×1920', 'Inherited next 1080×1920']);
+    const aggregateDigest = sheet.locator('.lineage-resolution-digest code');
+    const initialAggregateDigest = await aggregateDigest.textContent();
 
     const secondCard = sourceCards.filter({ hasText: secondSource!.asset_id });
     await secondCard.locator('summary').click();
@@ -58,6 +62,7 @@ test('canvas persists independent node targets, plans only from their digest, an
     await editor.locator('.node-next-custom-targets input[type="number"]').nth(1).fill('1500');
     await editor.getByRole('button', { name: 'Set sticky targets' }).click();
     await expect(secondCard).toContainText('Sticky next 1200×1500');
+    await expect.poll(() => aggregateDigest.textContent()).not.toBe(initialAggregateDigest);
 
     await sheet.getByLabel('Generation prompt').fill('Create exact independent static-image variants');
     await sheet.getByLabel('Variations per produced geometry').fill('2');
@@ -65,7 +70,6 @@ test('canvas persists independent node targets, plans only from their digest, an
     await expect(sheet.getByText(/4 exact outputs/)).toBeVisible();
     await expect(sheet.getByText('1080 × 1920 px', { exact: true })).toBeVisible();
     await expect(sheet.getByText('1200 × 1500 px', { exact: true })).toBeVisible();
-    const aggregateDigest = sheet.locator('.lineage-resolution-digest code');
     await expect(aggregateDigest).toHaveText(/^[a-f0-9]{64}$/);
 
     await sheet.getByRole('button', { name: 'Create planned job' }).click();
@@ -112,7 +116,7 @@ test('canvas persists independent node targets, plans only from their digest, an
     ].sort((a, b) => a.parent.localeCompare(b.parent)));
 
     const firstSourceTitle = snapshot.nodes.find(node => node.asset_id === firstSourceId)!.title;
-    await page.getByRole('button', { name: `${firstSourceTitle} details`, exact: true }).dispatchEvent('dblclick');
+    await page.getByRole('button', { name: `${firstSourceTitle} details` }).dispatchEvent('dblclick');
     await expect(page.getByRole('complementary', { name: 'Canvas asset details' })).toBeVisible();
     await page.getByRole('button', { name: `Open full detail for ${firstSourceTitle}` }).click();
     const detail = page.getByRole('dialog', { name: firstSourceTitle });

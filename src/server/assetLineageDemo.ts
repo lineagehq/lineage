@@ -7,13 +7,49 @@ import { requireEdgeSummary } from '../shared/edgeSummary';
 import { defaultProject, packageRoot, repoRoot } from './assetCore';
 import { linkLineageAssets, updateLineageLayout, updateSelectedAsset } from './assetLineage';
 import { lineageDb, nowIso } from './assetLineageDb';
-import { archiveLineageWorkspace, createLineageWorkspace, isLineageWorkspaceError, lineageWorkspaceId } from './assetLineageWorkspaces';
+import { archiveLineageWorkspace, createLineageWorkspace, isLineageWorkspaceError, lineageWorkspaceId, listLineageWorkspaces, updateLineageWorkspace } from './assetLineageWorkspaces';
+import {
+  ensureSwissifierDemoProject,
+  restoreSwissifierDemoProjectDefinition,
+  swissifierDemoProject,
+} from './projectWorkspaces';
 import { fileSha256 } from './localReview';
 
 const demoWorkspaceTitle = 'Demo: Content iteration tree';
 const demoWorkspaceNotes = 'Repeatable sample lineage for demos and onboarding. Archive it when reviewing real work.';
 const demoBasePath = ['lineage-demo', '2026-06-lineage-demo'];
 const swissifierManifestPath = join(packageRoot, 'fixtures', defaultProject, 'lineage', 'swissifier-rich-demo.json');
+const legacyDemoSelectionPrompt = 'Demo selected winner for the next variation.';
+const legacySwissifierSelectionPrompt = 'Swissifier rich demo bases selected for the next variation.';
+
+function clearLegacySeedSelectionPrompt(project: string, rootAssetId: string, prompt: string): void {
+  const database = lineageDb();
+  database.exec('BEGIN IMMEDIATE');
+  try {
+    database.prepare(`
+      update asset_selections
+      set notes = null
+      where project_id = ? and root_asset_id = ? and notes = ?
+        and asset_id not in (
+          select target_asset_id from lineage_tasks
+          where project_id = ? and root_asset_id = ? and task_type = 'iterate'
+            and status in ('claimed', 'in_progress')
+        )
+    `).run(project, rootAssetId, prompt, project, rootAssetId);
+    database.prepare(`
+      update lineage_tasks
+      set instructions = null, updated_at = ?
+      where project_id = ? and root_asset_id = ? and task_type = 'iterate'
+        and status = 'pending' and instructions = ?
+    `).run(nowIso(), project, rootAssetId, prompt);
+    database.exec('COMMIT');
+  } catch (error) {
+    database.exec('ROLLBACK');
+    throw error;
+  } finally {
+    database.close();
+  }
+}
 
 interface SwissifierManifestAsset {
   asset_id: string;
@@ -28,6 +64,7 @@ interface SwissifierManifestAsset {
 }
 
 interface SwissifierManifestRerollAttempt {
+  asset_id?: string;
   node_asset_id: string;
   file: string;
   title: string;
@@ -111,6 +148,123 @@ function demoFilePath(project: string, asset: typeof demoAssets[number]): string
 
 function swissifierManifest(): SwissifierManifest {
   return JSON.parse(readFileSync(swissifierManifestPath, 'utf8')) as SwissifierManifest;
+}
+
+function projectScopedDemoAssetId(project: string, assetId: string): string {
+  const database = lineageDb();
+  try {
+    const owner = database.prepare('select project_id from assets where id = ?')
+      .get(assetId) as { project_id: string } | undefined;
+    const suffix = createHash('sha256').update(`${project}\0${assetId}`).digest('hex').slice(0, 16);
+    const alias = `${assetId}--${suffix}`;
+    const aliasOwner = database.prepare('select project_id from assets where id = ?')
+      .get(alias) as { project_id: string } | undefined;
+    if (owner?.project_id === project) return assetId;
+    if (aliasOwner?.project_id === project) return alias;
+    if (aliasOwner && aliasOwner.project_id !== project) {
+      throw new Error(`Project-scoped Swissifier asset identity collision for ${assetId}`);
+    }
+    return owner ? alias : assetId;
+  } finally {
+    database.close();
+  }
+}
+
+function projectScopedSwissifierManifest(project: string, source = swissifierManifest()): SwissifierManifest {
+  if (project !== swissifierDemoProject) return source;
+  const assetIds = new Map(source.assets.map(asset => [
+    asset.asset_id,
+    projectScopedDemoAssetId(project, asset.asset_id),
+  ]));
+  const mapped = (assetId: string) => assetIds.get(assetId) || projectScopedDemoAssetId(project, assetId);
+  return {
+    ...source,
+    root_asset_id: mapped(source.root_asset_id),
+    selected_asset_ids: source.selected_asset_ids.map(mapped),
+    assets: source.assets.map(asset => ({ ...asset, asset_id: mapped(asset.asset_id) })),
+    edges: source.edges.map(edge => ({
+      ...edge,
+      parent: mapped(edge.parent),
+      child: mapped(edge.child),
+    })),
+    reroll_attempts: source.reroll_attempts?.map(attempt => ({
+      ...attempt,
+      asset_id: projectScopedDemoAssetId(project, `local-${attempt.checksum_sha256.slice(0, 12)}`),
+      node_asset_id: mapped(attempt.node_asset_id),
+    })),
+  };
+}
+
+export function swissifierRichDemoRootAssetId(project?: string): string {
+  const manifest = swissifierManifest();
+  return project ? projectScopedSwissifierManifest(project, manifest).root_asset_id : manifest.root_asset_id;
+}
+
+export function ensureSwissifierRichDemoWorkspace() {
+  const project = ensureSwissifierDemoProject();
+  if (!project) return null;
+  const manifest = projectScopedSwissifierManifest(swissifierDemoProject);
+  const existing = listLineageWorkspaces(swissifierDemoProject).workspaces
+    .find(workspace => workspace.root_asset_id === manifest.root_asset_id);
+  if (existing) {
+    return {
+      ok: true as const,
+      message: `Using ${manifest.title}`,
+      demo_id: manifest.id,
+      root_asset_id: manifest.root_asset_id,
+      workspace: existing,
+      project,
+      seeded: false,
+    };
+  }
+  const database = lineageDb();
+  try {
+    const deleted = database.prepare(`
+      select 1 from deleted_lineage_workspaces where project_id = ? and root_asset_id = ?
+    `).get(swissifierDemoProject, manifest.root_asset_id);
+    if (deleted) {
+      return {
+        ok: true as const,
+        message: 'Swissifier rich demo workspace remains permanently deleted',
+        demo_id: manifest.id,
+        root_asset_id: manifest.root_asset_id,
+        workspace: null,
+        project,
+        seeded: false,
+        workspace_deleted: true as const,
+      };
+    }
+  } finally {
+    database.close();
+  }
+  const seeded = seedSwissifierRichDemoWorkspace(swissifierDemoProject, {
+    activate: false,
+    confirmWrite: true,
+  });
+  return { ...seeded, project, seeded: true };
+}
+
+export function restoreSwissifierRichDemoProject(confirmWrite: boolean) {
+  if (!confirmWrite) {
+    return {
+      ok: true as const,
+      dryRun: true as const,
+      project: swissifierDemoProject,
+      root_asset_id: swissifierRichDemoRootAssetId(swissifierDemoProject),
+    };
+  }
+  restoreSwissifierDemoProjectDefinition(true);
+  const restored = ensureSwissifierRichDemoWorkspace();
+  if (!restored?.workspace) {
+    const reason = restored && 'migration_deferred' in restored && restored.migration_deferred
+      ? restored.message
+      : 'Swissifier Demo restore did not produce a workspace';
+    throw new Error(reason);
+  }
+  return {
+    ...restored,
+    message: 'Restored Swissifier Demo project',
+  };
 }
 
 function swissifierRelativePath(manifest: SwissifierManifest, asset: SwissifierManifestAsset): string {
@@ -459,8 +613,9 @@ function swissifierRerollAsset(attempt: SwissifierManifestRerollAttempt) {
   if (body.length !== attempt.size_bytes) throw new Error(`Unexpected Swissifier re-roll fixture size for ${attempt.file}`);
   const checksumSha256 = sha256Hex(body);
   if (checksumSha256 !== attempt.checksum_sha256) throw new Error(`Checksum mismatch for Swissifier re-roll fixture: ${attempt.file}`);
+  const sourceAssetId = `local-${checksumSha256.slice(0, 12)}`;
   return {
-    assetId: `local-${checksumSha256.slice(0, 12)}`,
+    assetId: attempt.asset_id || sourceAssetId,
     checksumSha256,
     sizeBytes: body.length,
   };
@@ -697,10 +852,10 @@ export function seedDemoLineageWorkspace(project: string, fields: { activate?: b
   for (const [parent, child] of demoEdges) {
     linkLineageAssets(project, { parentAssetId: ids[parent], childAssetId: ids[child], confirmWrite: true });
   }
+  clearLegacySeedSelectionPrompt(project, rootAssetId, legacyDemoSelectionPrompt);
   updateSelectedAsset(project, {
     assetId: ids.winner,
     confirmWrite: true,
-    notes: 'Demo selected winner for the next variation.',
     rootAssetId,
   });
   updateLineageLayout(project, {
@@ -728,7 +883,7 @@ export function seedDemoLineageWorkspace(project: string, fields: { activate?: b
 }
 
 export function seedSwissifierRichDemoWorkspace(project: string, fields: { activate?: boolean; confirmWrite: boolean }) {
-  const manifest = swissifierManifest();
+  const manifest = projectScopedSwissifierManifest(project);
   if (!fields.confirmWrite) {
     return {
       ok: true as const,
@@ -746,19 +901,7 @@ export function seedSwissifierRichDemoWorkspace(project: string, fields: { activ
   }
   backfillSwissifierEdgeSummaries(project, manifest);
   const reroll_attempts = upsertSwissifierRerollAttempts(project, manifest);
-  updateSelectedAsset(project, {
-    assetIds: manifest.selected_asset_ids,
-    confirmWrite: true,
-    maxSelections: manifest.selected_asset_ids.length,
-    notes: 'Swissifier rich demo bases selected for the next variation.',
-    rootAssetId: manifest.root_asset_id,
-  });
-  updateLineageLayout(project, {
-    confirmWrite: true,
-    rootAssetId: manifest.root_asset_id,
-    positions: manifest.assets.map(asset => ({ assetId: asset.asset_id, ...asset.position })),
-  });
-  const workspace = createLineageWorkspace(project, {
+  let workspace = createLineageWorkspace(project, {
     activate: fields.activate !== false,
     confirmWrite: true,
     createdBy: 'system',
@@ -766,6 +909,24 @@ export function seedSwissifierRichDemoWorkspace(project: string, fields: { activ
     rootAssetId: manifest.root_asset_id,
     title: manifest.title,
   }).workspace;
+  if (workspace && (workspace.max_queued_branches ?? 3) < manifest.selected_asset_ids.length) {
+    workspace = updateLineageWorkspace(project, workspace.id, {
+      confirmWrite: true,
+      maxQueuedBranches: manifest.selected_asset_ids.length,
+    }).workspace;
+  }
+  clearLegacySeedSelectionPrompt(project, manifest.root_asset_id, legacySwissifierSelectionPrompt);
+  updateSelectedAsset(project, {
+    assetIds: manifest.selected_asset_ids,
+    confirmWrite: true,
+    maxSelections: manifest.selected_asset_ids.length,
+    rootAssetId: manifest.root_asset_id,
+  });
+  updateLineageLayout(project, {
+    confirmWrite: true,
+    rootAssetId: manifest.root_asset_id,
+    positions: manifest.assets.map(asset => ({ assetId: asset.asset_id, ...asset.position })),
+  });
   return {
     ok: true as const,
     message: `Seeded ${manifest.title}`,

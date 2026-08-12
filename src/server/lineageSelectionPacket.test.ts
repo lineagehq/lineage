@@ -164,6 +164,7 @@ describe('lineage selection packet', () => {
     expect(packet.assets).toHaveLength(1);
     expect(packet.assets[0]).toMatchObject({
       asset_id: files.childId,
+      branch_prompt: 'Use this image in GrowthOps.',
       local: {
         absolute_path: files.child,
         exists: true,

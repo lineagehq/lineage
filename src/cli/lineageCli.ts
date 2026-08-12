@@ -30,6 +30,7 @@ import { getLineageBrief, linkSelectedLineageChild } from '../server/assetLineag
 import { listAssetSocialMarks, markAssetSocial, unmarkAssetSocial } from '../server/social/socialMarks';
 import { addSocialVariant, createSocialWorkItem, editSocialVariant, getSocialWorkItem, removeSocialVariant } from '../server/social/socialWorkItems';
 import { validateSocialWorkItem } from '../server/social/socialValidation';
+import { clearAssetDiscussionMarks, listAssetDiscussionMarks, markAssetDiscussion, noteAssetDiscussion, unmarkAssetDiscussion } from '../server/assetDiscussionMarks';
 import {
   addLineageTaskComment,
   cancelLineageTask,
@@ -325,6 +326,11 @@ Usage:
   ${config.binName} social variant edit --project <project> --variant <variant-id> --expected-revision <number> [--copy <text>] [--hashtag <tag>] [--hashtag-placement caption|first_comment] [--alt-text <text>] [--alt-text-reviewed --alt-text-reviewed-by <actor>] [--publish-method automatic|notification] [--composition-mode customScheduled|addToQueue] [--custom-scheduled-at <zoned-iso-time>] --confirm-write [--actor <actor>] [--claim-token <claim-id.secret>] [--json]
   ${config.binName} social variant remove --project <project> --variant <variant-id> --expected-revision <number> --confirm-write [--actor <actor>] [--claim-token <claim-id.secret>] [--json]
   ${config.binName} social validate --project <project> --item <item-id> [--json]
+  ${config.binName} discuss list --project <project> --root <asset-id> [--db <path>] [--json]
+  ${config.binName} discuss mark --project <project> --root <asset-id> --asset <asset-id-or-exact-title> --confirm-write [--actor <actor>] [--notes <text>] [--claim-token <claim-id.secret>] [--db <path>] [--json]
+  ${config.binName} discuss note --project <project> --root <asset-id> --asset <asset-id-or-exact-title> --notes <text> --confirm-write [--actor <actor>] [--claim-token <claim-id.secret>] [--db <path>] [--json]
+  ${config.binName} discuss unmark --project <project> --root <asset-id> --asset <asset-id-or-exact-title> --confirm-write [--actor <actor>] [--claim-token <claim-id.secret>] [--db <path>] [--json]
+  ${config.binName} discuss clear --project <project> --root <asset-id> --confirm-write [--actor <actor>] [--claim-token <claim-id.secret>] [--db <path>] [--json]
   ${config.binName} tasks list --root <asset-id> [--project <project>] [--db <path>] [--json]
   ${config.binName} tasks inspect --task <task-id> [--project <project>] [--db <path>] [--json]
   ${config.binName} tasks claim --task <task-id> --agent-name <name> [--project <project>] [--db <path>] [--json]
@@ -1057,6 +1063,44 @@ export function runLineageDataCommand(command: string, args: string[]): unknown 
     }
     throw new Error(`Unknown social command: ${subcommand}`);
   }
+  if (command === 'discuss') {
+    const subcommand = positionalArgs(args)[0] || '';
+    const explicitProject = readOption(args, '--project');
+    const asset = readOption(args, '--asset');
+    if (!explicitProject) throw new Error(`lineage discuss ${subcommand || 'command'} requires --project`);
+    if (!options.rootAssetId) throw new Error(`lineage discuss ${subcommand || 'command'} requires --root`);
+    if (subcommand === 'list') return listAssetDiscussionMarks(explicitProject, options.rootAssetId);
+    if (subcommand === 'clear') {
+      return clearAssetDiscussionMarks(explicitProject, {
+        claimToken: options.claimToken,
+        clearedBy: readOption(args, '--actor') || 'agent',
+        confirmWrite: options.confirmWrite,
+        rootAssetId: options.rootAssetId,
+      });
+    }
+    if (!asset) throw new Error(`lineage discuss ${subcommand || 'command'} requires --asset`);
+    if (subcommand === 'mark') {
+      return markAssetDiscussion(explicitProject, {
+        asset, claimToken: options.claimToken, confirmWrite: options.confirmWrite,
+        markedBy: readOption(args, '--actor') || 'agent', notes: readOption(args, '--notes'), rootAssetId: options.rootAssetId,
+      });
+    }
+    if (subcommand === 'note') {
+      const notes = readOption(args, '--notes');
+      if (notes === undefined) throw new Error('lineage discuss note requires --notes');
+      return noteAssetDiscussion(explicitProject, {
+        asset, claimToken: options.claimToken, confirmWrite: options.confirmWrite,
+        notes, rootAssetId: options.rootAssetId, updatedBy: readOption(args, '--actor') || 'agent',
+      });
+    }
+    if (subcommand === 'unmark') {
+      return unmarkAssetDiscussion(explicitProject, {
+        asset, claimToken: options.claimToken, confirmWrite: options.confirmWrite,
+        rootAssetId: options.rootAssetId, unmarkedBy: readOption(args, '--actor') || 'agent',
+      });
+    }
+    throw new Error(`Unknown discuss command: ${subcommand}`);
+  }
   if (command === 'tasks') {
     const subcommand = positionalArgs(args)[0] || '';
     const taskId = readOption(args, '--task');
@@ -1211,6 +1255,30 @@ export function printDataResult(command: string, result: unknown, json: boolean)
     }
     const mutation = result as { active?: boolean; dryRun?: boolean; mark?: { asset_id?: string } };
     console.log(`${mutation.dryRun ? 'Dry run: ' : ''}${mutation.active ? 'Marked' : 'Unmarked'} ${mutation.mark?.asset_id || 'asset'} for social`);
+    return;
+  }
+  if (command === 'discuss' && result && typeof result === 'object') {
+    if ('marks' in result) {
+      const listed = result as { marks: Array<{ asset_id: string; notes?: string; title: string; warnings?: string[] }> };
+      console.log(`${listed.marks.length} asset(s) in the Discussion set`);
+      for (const mark of listed.marks) {
+        console.log(`${mark.asset_id}: ${mark.title}${mark.notes ? ` — ${mark.notes}` : ''}`);
+        for (const warning of mark.warnings || []) console.log(`Warning: ${warning}`);
+      }
+      return;
+    }
+    if ('cleared_count' in result) {
+      const cleared = result as { cleared_count: number; dryRun?: boolean };
+      console.log(`${cleared.dryRun ? 'Dry run: ' : ''}Cleared ${cleared.cleared_count} asset(s) from the Discussion set`);
+      return;
+    }
+    const mutation = result as { active?: boolean; dryRun?: boolean; mark?: { asset_id?: string; notes?: string }; operation?: 'mark' | 'note' | 'unmark' };
+    const prefix = mutation.dryRun ? 'Dry run: ' : '';
+    if (mutation.operation === 'note') {
+      console.log(`${prefix}${mutation.mark?.notes ? 'Updated' : 'Cleared'} discussion note for ${mutation.mark?.asset_id || 'asset'}`);
+    } else {
+      console.log(`${prefix}${mutation.active ? 'Marked' : 'Unmarked'} ${mutation.mark?.asset_id || 'asset'} ${mutation.active ? 'for discussion' : 'from the Discussion set'}`);
+    }
     return;
   }
   if (command === 'tasks' && result && typeof result === 'object') {
@@ -1425,6 +1493,7 @@ export function lineageCliRequiresWriterLease(command: string, args: string[]): 
     if (subcommand === 'item') return positions[1] !== 'show';
     return true;
   }
+  if (command === 'discuss') return subcommand !== 'list';
   if (command === 'tasks') return subcommand !== 'list' && subcommand !== 'inspect';
   if (command === 'db') return subcommand !== 'info';
   if (command === 'agent') return subcommand !== 'status' && subcommand !== 'graph' && subcommand !== 'inspect';
@@ -1443,6 +1512,7 @@ export function lineageCliCanDelegateMutation(command: string, args: string[]): 
     return subcommand === 'item' && positions[1] === 'create'
       || subcommand === 'variant' && ['add', 'edit', 'remove'].includes(positions[1] || '');
   }
+  if (command === 'discuss') return ['mark', 'note', 'unmark', 'clear'].includes(subcommand);
   if (command === 'tasks') return ['claim', 'start', 'comment', 'cancel', 'override', 'instructions'].includes(subcommand);
   if (command === 'agent') return ['claim', 'heartbeat', 'release', 'revoke', 'transfer'].includes(subcommand);
   return false;
@@ -1831,7 +1901,7 @@ export async function runLineageCli(config: LineageCliConfig, args = process.arg
     process.exit(1);
   }
 
-  if (command === 'next' || command === 'brief' || command === 'inspect' || command === 'selection' || command === 'output-targets' || command === 'link-child' || command === 'generate' || command === 'reroll' || command === 'social' || command === 'tasks') {
+  if (command === 'next' || command === 'brief' || command === 'inspect' || command === 'selection' || command === 'output-targets' || command === 'link-child' || command === 'generate' || command === 'reroll' || command === 'social' || command === 'discuss' || command === 'tasks') {
     const commandArgs = normalizedArgs.slice(1);
     const json = commandArgs.includes('--json');
     try {

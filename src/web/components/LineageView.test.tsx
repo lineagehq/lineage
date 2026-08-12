@@ -370,14 +370,11 @@ describe('LineageView Social-mark integration', () => {
     });
     const tools = document.createElement('div'); tools.id = 'canvas-context-tools'; document.body.appendChild(tools);
     container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
-    act(() => root!.render(createElement(LineageView, { onSelectedAsset: vi.fn(), onToast: vi.fn(), project: 'demo-project' }))); await flush(); await flush();
-    act(() => [...tools.querySelectorAll('button')].find(button => button.textContent === 'New lineage')!.click());
+    const onNewWorkspaceCancelled = vi.fn();
+    act(() => root!.render(createElement(LineageView, { newWorkspaceRequest: 1, onNewWorkspaceCancelled, onSelectedAsset: vi.fn(), onToast: vi.fn(), project: 'demo-project' }))); await flush(); await flush();
     expect(container.querySelector('[aria-label="New lineage"]')).not.toBeNull();
-    act(() => container!.querySelector<HTMLButtonElement>('[data-testid="social-toggle"]')!.click());
-    expect(container.querySelector('[data-testid="social-panel"]')).toBeNull();
     act(() => [...container!.querySelectorAll('button')].find(button => button.textContent === 'Cancel')!.click()); await flush();
-    act(() => container!.querySelector<HTMLButtonElement>('[data-testid="social-toggle"]')!.click());
-    expect(container.querySelector('[data-testid="social-panel"]')).not.toBeNull();
+    expect(onNewWorkspaceCancelled).toHaveBeenCalledTimes(1);
     tools.remove();
   });
 

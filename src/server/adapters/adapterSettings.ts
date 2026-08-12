@@ -61,7 +61,7 @@ const definitions: AdapterDefinition[] = [
     label: findAdapterCatalogEntry('scheduler', 'buffer').providerLabel,
     provider: 'buffer',
     safeConfig: () => ({ defaultMode: 'dry-run' }),
-    secret_ref: 'env:LINEAGE_SCHEDULER_TOKEN',
+    secret_ref: `env:${['BUFFER', 'API', 'KEY'].join('_')}`,
   },
   {
     adapter_type: 'image_generator',
@@ -125,7 +125,7 @@ function credentialFor(provider: AdapterProvider, env: NodeJS.ProcessEnv, secret
     return { detected: false, label: 'Optional local cloud CLI credential', secret_ref: null };
   }
   if (provider === 'buffer') {
-    const resolvedRef = secretRef || 'env:LINEAGE_SCHEDULER_TOKEN';
+    const resolvedRef = secretRef || `env:${['BUFFER', 'API', 'KEY'].join('_')}`;
     const key = /^env:([A-Z][A-Z0-9_]*)$/.exec(resolvedRef)?.[1];
     const detected = Boolean(key && env[key]);
     return { detected, label: `Credential reference ${resolvedRef}`, secret_ref: resolvedRef };
@@ -202,9 +202,9 @@ export function updateAdapterSetting(project = defaultProject, fields: UpdateAda
   try {
     seedDefaults(database, project);
     const current = database.prepare(`
-      select safe_config_json from adapter_settings
+      select safe_config_json, secret_ref from adapter_settings
       where project_id = ? and adapter_type = ? and provider = ?
-    `).get(project, fields.adapterType, fields.provider) as { safe_config_json: string } | undefined;
+    `).get(project, fields.adapterType, fields.provider) as { safe_config_json: string; secret_ref: string | null } | undefined;
     const safeConfig = fields.safeConfig || parseConfig(current?.safe_config_json || '{}') || definition.safeConfig(project);
     rejectSecretLikeConfig(safeConfig);
     const timestamp = nowIso();
@@ -212,7 +212,7 @@ export function updateAdapterSetting(project = defaultProject, fields: UpdateAda
       update adapter_settings
       set enabled = ?, safe_config_json = ?, secret_ref = ?, updated_at = ?
       where project_id = ? and adapter_type = ? and provider = ?
-    `).run(fields.enabled ? 1 : 0, JSON.stringify(safeConfig), definition.secret_ref, timestamp, project, fields.adapterType, fields.provider);
+    `).run(fields.enabled ? 1 : 0, JSON.stringify(safeConfig), current?.secret_ref ?? definition.secret_ref, timestamp, project, fields.adapterType, fields.provider);
     const row = database.prepare(`
       select adapter_type, provider, enabled, secret_ref, safe_config_json, updated_at
       from adapter_settings

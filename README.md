@@ -132,6 +132,24 @@ view-only and session-local, nested choices are preserved, shared descendants
 remain visible through any other expanded path, and growth replay temporarily
 shows the complete lineage.
 
+### Buffer Release 1 operator boundary
+
+Release 1 is a project-scoped channel-sync and composition foundation. In
+**Settings → Social scheduling**, first confirm the Release environment and
+profile are the intended Lineage runtime. **Connect** then records one Buffer
+organization ID and an environment-variable reference; the credential value
+stays in the service environment and is never stored or displayed. **Sync
+channels** is a separate confirmed action
+that performs only pinned Buffer channel reads and updates Lineage's local
+catalog. A removed channel remains visible as stale and unavailable; a
+disconnected channel remains visible with its unavailable state.
+
+Enabling Buffer does not authorize external mutation. The legacy posting
+adapter remains dry-run-only, and Release 1 does not schedule posts, upload
+media, synchronize deliveries, run research, or retrieve metrics. Use synthetic
+organization and channel identifiers in tests, examples, screenshots, and
+support reports.
+
 ### Install the published channels
 
 Use the currently published npm dist-tags when you want installed rather than

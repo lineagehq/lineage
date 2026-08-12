@@ -16,7 +16,28 @@ profile. A PID or open port is not proof of Lineage identity.
 
 ## Buffer will not post live
 
-This is expected. Buffer support is preview and dry-run only.
+This is expected. Release 1 is a channel-sync and local composition foundation;
+the legacy posting adapter remains dry-run-only. Connect, Sync channels, and the
+Canvas Social panel perform no scheduling, upload, publication, delivery sync,
+research, or metrics retrieval. Live scheduling is unavailable in Release 1.
+
+## Buffer channels will not synchronize
+
+In Settings, first verify the Release channel, named profile, and environment.
+Then inspect the normalized Buffer status:
+
+- **Credential unavailable:** set the named environment variable in the active
+  Lineage service environment and restart that exact profile service.
+- **Organization mismatch:** reconnect the current project to the intended
+  organization, then sync again. Never reuse channel IDs across organizations.
+- **Never synced:** Connect and Sync channels are separate; run Sync channels
+  after a healthy connection.
+- **Stale or disconnected:** the channel remains visible but unavailable. A
+  successful later sync may clear stale state; a provider-disconnected channel
+  stays unavailable.
+
+Do not paste tokens or real provider identifiers into screenshots, logs, issue
+reports, examples, or documentation.
 
 ## Documentation fails to deploy
 

@@ -589,7 +589,8 @@ export function LineageView({ asset, onAssetsChanged, onSocialDirtyChange, onSoc
     writeCanvasSettingsHintDismissed();
   }
   function togglePanel(mode: 'settings' | 'selection' | 'asset') {
-    if (!allowSocialTransition()) return;
+    const nonSocialSettingsInteraction = mode === 'settings' && panelModeRef.current !== 'social';
+    if (!nonSocialSettingsInteraction && !allowSocialTransition()) return;
     if (mode === 'settings') dismissSettingsHint();
     const invokingControl = document.activeElement;
     if (invokingControl instanceof HTMLElement) panelReturnFocusRef.current = invokingControl;

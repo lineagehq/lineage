@@ -78,7 +78,8 @@ export function App() {
   const updateLineageChildTransitionPending = useCallback((pending: boolean) => {
     lineageChildTransitionPendingRef.current = pending;
   }, []);
-  const allowLineageTransition = useCallback(() => activeAppTransitionTokenRef.current === null && !lineageChildTransitionPendingRef.current && confirmLineageSocialTransition(lineageSocialDirtyRef.current, () => window.confirm('Discard unsaved Social changes?')), []);
+  const approveLineageDiscard = useCallback(() => confirmLineageSocialTransition(lineageSocialDirtyRef.current, () => window.confirm('Discard unsaved Social changes?')), []);
+  const allowLineageTransition = useCallback(() => activeAppTransitionTokenRef.current === null && !lineageChildTransitionPendingRef.current && approveLineageDiscard(), [approveLineageDiscard]);
   const beginAppTransition = useCallback(() => {
     if (!allowLineageTransition()) return null;
     const token = ++appTransitionGenerationRef.current;
@@ -93,9 +94,14 @@ export function App() {
     return true;
   }, []);
   const changeProject = useCallback((nextProject: string) => {
-    if (nextProject === project || !allowLineageTransition()) return;
+    if (nextProject === project || !approveLineageDiscard()) return;
+    appTransitionGenerationRef.current += 1;
+    activeAppTransitionTokenRef.current = null;
+    lineageChildTransitionPendingRef.current = false;
+    setAppTransitionPending(false);
+    projectRef.current = nextProject;
     setProject(nextProject);
-  }, [allowLineageTransition, project]);
+  }, [approveLineageDiscard, project]);
   const changeView = useCallback((nextView: StudioView) => {
     if (nextView === view || !allowLineageTransition()) return;
     setView(nextView);

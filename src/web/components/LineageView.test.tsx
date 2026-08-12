@@ -231,6 +231,33 @@ describe('LineageView Social-mark integration', () => {
     tools.remove();
   });
 
+  it('honors one enabled Canvas settings click during a non-Social refresh settlement', async () => {
+    const refreshResponse = deferred<LineageSnapshot>();
+    let reads = 0;
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path.startsWith('/api/lineage/social-root?')) return ++reads === 1 ? Promise.resolve(snapshot(true)) : refreshResponse.promise;
+      if (path.startsWith('/api/agent-claims?')) return Promise.resolve({ claims: [] });
+      if (path.startsWith('/api/generation/jobs?')) return Promise.resolve({ jobs: [] });
+      if (path.startsWith('/api/generation/targets?')) return Promise.resolve({ effective: null, setting: null });
+      return Promise.resolve({});
+    });
+    const tools = document.createElement('div'); tools.id = 'canvas-context-tools'; document.body.appendChild(tools);
+    container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+    act(() => root!.render(createElement(LineageView, { onSelectedAsset: vi.fn(), onToast: vi.fn(), project: 'demo-project' })));
+    await flush(); await flush();
+
+    const refresh = [...tools.querySelectorAll('button')].find(button => button.textContent === 'Refresh graph')!;
+    act(() => refresh.click()); await flush();
+    const settings = container.querySelector<HTMLButtonElement>('[aria-label="Open Canvas settings"]')!;
+    expect(settings.disabled).toBe(false);
+    act(() => settings.click());
+    expect(container.querySelectorAll('[aria-label="Canvas settings"]')).toHaveLength(1);
+
+    await act(async () => refreshResponse.resolve(snapshot(true))); await flush();
+    expect(container.querySelectorAll('[aria-label="Canvas settings"]')).toHaveLength(1);
+    tools.remove();
+  });
+
   it('owns the create-workspace flow from modal entry through cancellation', async () => {
     vi.mocked(api).mockImplementation((path: string) => {
       if (path.startsWith('/api/lineage/social-root?')) return Promise.resolve(snapshot(true));

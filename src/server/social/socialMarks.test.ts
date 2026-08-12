@@ -75,7 +75,7 @@ describe('canonical Social-mark domain boundary', () => {
     const downstreamState = () => ({
       contentPosts: Number((database.prepare('select count(*) count from content_posts').get() as { count: number }).count),
       lineageTasks: Number((database.prepare('select count(*) count from lineage_tasks').get() as { count: number }).count),
-      socialWorkItems: database.prepare("select name from sqlite_master where type = 'table' and name = 'social_work_items'").get() || null,
+      socialWorkItems: Number((database.prepare('select count(*) count from social_work_items').get() as { count: number }).count),
     });
     try {
       const before = downstreamState();
@@ -86,7 +86,7 @@ describe('canonical Social-mark domain boundary', () => {
       expect(createBufferAdapter).not.toHaveBeenCalled();
       expect(buildBufferPayload).not.toHaveBeenCalled();
       expect(downstreamState()).toEqual(before);
-      expect(before.socialWorkItems).toBeNull();
+      expect(before.socialWorkItems).toBe(0);
     } finally {
       database.close();
     }

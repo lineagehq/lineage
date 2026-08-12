@@ -108,6 +108,13 @@ describe('lineage CLI start options', () => {
     expect(help).toContain('lineage social list --project <project> --root <asset-id>');
     expect(help).toContain('lineage social mark --project <project> --root <asset-id> --asset <asset-id-or-exact-title> --confirm-write');
     expect(help).toContain('lineage social unmark --project <project> --root <asset-id> --asset <asset-id-or-exact-title> --confirm-write');
+    expect(help).toContain('lineage social item create --project <project> --root <asset-id> --asset <asset-id>');
+    expect(help).toContain('lineage social variant edit --project <project> --variant <variant-id>');
+    expect(help).toContain('lineage social variant remove --project <project> --variant <variant-id> --expected-revision <number>');
+    expect(help).toContain('--composition-mode customScheduled|addToQueue');
+    expect(help).not.toContain('--network-metadata');
+    expect(help).toContain('lineage social validate --project <project> --item <item-id>');
+    expect(help).not.toContain('lineage social schedule');
     expect(help).toContain('lineage db info [--db <path>] [--json]');
     expect(help).toContain('lineage runtime doctor [--json]');
     expect(help).toContain('lineage start --profile <id-or-manifest> [--open] [--json]');
@@ -1306,6 +1313,81 @@ describe('lineage CLI handoff commands', () => {
     expect(lineageCliCanDelegateMutation('social', ['list'])).toBe(false);
     expect(lineageCliCanDelegateMutation('social', ['mark'])).toBe(true);
     expect(lineageCliCanDelegateMutation('social', ['unmark'])).toBe(true);
+    expect(lineageCliRequiresWriterLease('social', ['item', 'show'])).toBe(false);
+    expect(lineageCliRequiresWriterLease('social', ['item', 'create'])).toBe(true);
+    expect(lineageCliRequiresWriterLease('social', ['validate'])).toBe(false);
+    expect(lineageCliRequiresWriterLease('social', ['variant', 'add'])).toBe(true);
+    expect(lineageCliCanDelegateMutation('social', ['item', 'show'])).toBe(false);
+    expect(lineageCliCanDelegateMutation('social', ['item', 'create'])).toBe(true);
+    expect(lineageCliCanDelegateMutation('social', ['variant', 'edit'])).toBe(true);
+  });
+
+  it('composes Social Work Items and immutable channel variants without exposing scheduling', () => {
+    seedCliDb();
+    runLineageDataCommand('social', ['mark', '--project', defaultProject, '--root', fixtureRootAssetId, '--asset', fixtureRootAssetId, '--confirm-write', '--json']);
+    const database = new DatabaseSync(cliDbFile); const timestamp = '2026-08-12T12:00:00.000Z';
+    database.prepare(`insert into buffer_channels (project_id, channel_id, organization_id, service, service_id, display_name, avatar_ref, timezone, posting_schedule_json, allowed_actions_json, capability_json, disconnected, locked, paused, available, capability_registry_version, provider_fingerprint, synced_at, stale_at)
+      values (?, 'cli-channel', 'cli-org', 'instagram', null, 'CLI channel', null, 'America/Phoenix', '{}', '[]', ?, 0, 0, 0, 1, 1, 'cli-fingerprint', ?, null)`)
+      .run(defaultProject, JSON.stringify({ automatic: true, notification: true, scheduling_modes: ['customScheduled', 'addToQueue'], supported: true }), timestamp);
+    database.close();
+
+    expect(() => runLineageDataCommand('social', ['item', 'create', '--project', defaultProject, '--root', fixtureRootAssetId, '--confirm-write']))
+      .toThrow('requires --asset');
+    expect(() => runLineageDataCommand('social', ['item', 'create', '--project', defaultProject, '--root', fixtureRootAssetId, '--asset', fixtureRootAssetId, '--api-key', 'secret', '--confirm-write']))
+      .toThrow('Unknown option --api-key');
+    const malformedCreates = [
+      ['item', 'create', '--project', defaultProject, '--root', fixtureRootAssetId, '--asset', fixtureRootAssetId, '--campaign-key', 'stray', '--confirm-write', 'stray'],
+      ['item', 'create', '--project', defaultProject, '--root', fixtureRootAssetId, '--asset', fixtureRootAssetId, '--campaign-key', 'boolean-value', '--confirm-write=true'],
+      ['item', 'create', '--project', defaultProject, '--root', fixtureRootAssetId, '--asset', fixtureRootAssetId, '--campaign-key', 'one', '--campaign-key', 'two', '--confirm-write'],
+      ['item', 'create', '--project', defaultProject, '--root', fixtureRootAssetId, '--asset', fixtureRootAssetId, '--campaign-key', '--confirm-write'],
+      ['item', 'create', '--project', defaultProject, '--project', 'other-project', '--root', fixtureRootAssetId, '--asset', fixtureRootAssetId, '--campaign-key', 'conflict', '--confirm-write'],
+    ];
+    for (const malformed of malformedCreates) expect(() => runLineageDataCommand('social', malformed)).toThrow();
+    const rejectedCreateDb = new DatabaseSync(cliDbFile);
+    expect(Number((rejectedCreateDb.prepare('select count(*) count from social_work_items').get() as { count: number }).count)).toBe(0);
+    rejectedCreateDb.close();
+    const created = runLineageDataCommand('social', ['item', 'create', '--project', defaultProject, '--root', fixtureRootAssetId, '--asset', fixtureRootAssetId, '--campaign-key', 'cli-campaign', '--actor', 'human:cli', '--confirm-write', '--json']) as { item: { id: string }; schema_version: string };
+    expect(created).toMatchObject({ schema_version: 'lineage.social_work_item.v1', item: { campaign_key: 'cli-campaign' } });
+    const shown = runLineageDataCommand('social', ['item', 'show', '--project', defaultProject, '--item', created.item.id, '--json']) as { item: { id: string } };
+    expect(shown.item.id).toBe(created.item.id);
+    const added = runLineageDataCommand('social', ['variant', 'add', '--project', defaultProject, '--item', created.item.id, '--channel-id', 'cli-channel', '--actor', 'human:cli', '--confirm-write', '--json']) as { item: { variants: Array<{ id: string }> } };
+    const variantId = added.item.variants[0].id;
+    expect(() => runLineageDataCommand('social', ['variant', 'edit', '--project', defaultProject, '--variant', variantId, '--expected-revision', '1', '--publish-method', 'silent', '--confirm-write']))
+      .toThrow('automatic or notification');
+    expect(() => runLineageDataCommand('social', ['variant', 'edit', '--project', defaultProject, '--variant', variantId, '--expected-revision', '1', '--composition-mode', 'scheduled', '--confirm-write']))
+      .toThrow('customScheduled or addToQueue');
+    expect(() => runLineageDataCommand('social', ['variant', 'edit', '--project', defaultProject, '--variant', variantId, '--expected-revision', '1.5', '--confirm-write']))
+      .toThrow('positive integer');
+    expect(() => runLineageDataCommand('social', ['variant', 'edit', '--project', defaultProject, '--variant', variantId, '--expected-revision', '1', '--composition-mode', 'customScheduled', '--custom-scheduled-at', '2026-08-20T18:00:00', '--confirm-write']))
+      .toThrow('exact ISO timestamp');
+    expect(() => runLineageDataCommand('social', ['variant', 'edit', '--project', defaultProject, '--variant', variantId, '--copy', 'missing concurrency', '--confirm-write']))
+      .toThrow('expectedRevision is required');
+    const beforeUnknown = new DatabaseSync(cliDbFile);
+    const revisionCountBefore = Number((beforeUnknown.prepare('select count(*) count from social_variant_revisions where variant_id=?').get(variantId) as { count: number }).count);
+    beforeUnknown.close();
+    expect(() => runLineageDataCommand('social', ['variant', 'edit', '--project', defaultProject, '--variant', variantId, '--expected-revision', '1', '--network-metadata', '{"nested":{"apiKey":"secret"}}', '--confirm-write']))
+      .toThrow('Unknown option --network-metadata');
+    expect(() => runLineageDataCommand('social', ['variant', 'edit', '--project', defaultProject, '--variant', variantId, '--expected-revision', '1', '--delivery-state', 'published', '--confirm-write']))
+      .toThrow('Unknown option --delivery-state');
+    const afterUnknown = new DatabaseSync(cliDbFile);
+    expect(Number((afterUnknown.prepare('select count(*) count from social_variant_revisions where variant_id=?').get(variantId) as { count: number }).count)).toBe(revisionCountBefore);
+    afterUnknown.close();
+    expect(() => runLineageDataCommand('social', ['variant', 'edit', '--project', defaultProject, '--variant', variantId, '--expected-revision', '1', '--copy', 'stray edit', '--confirm-write', 'stray']))
+      .toThrow('Unexpected Social command input');
+    const edited = runLineageDataCommand('social', [
+      'variant', 'edit', '--project', defaultProject, '--variant', variantId, '--expected-revision', '1',
+      '--copy', 'CLI caption', '--hashtag', '#One', '--hashtag', 'Two', '--hashtag-placement', 'first_comment',
+      '--alt-text', 'Reviewed CLI image', '--alt-text-reviewed', '--alt-text-reviewed-by', 'human:cli',
+      '--publish-method', 'notification', '--composition-mode', 'customScheduled', '--custom-scheduled-at', '2026-08-20T18:00:00-07:00',
+      '--actor', 'human:cli', '--confirm-write', '--json',
+    ]) as { item: { variants: Array<{ current_revision: number; revision: { hashtags: unknown[]; composition_mode?: string } }> } };
+    expect(edited.item.variants[0]).toMatchObject({ current_revision: 2, revision: { hashtags: [{ position: 0, value: 'one' }, { position: 1, value: 'two' }], composition_mode: 'customScheduled' } });
+    const validation = runLineageDataCommand('social', ['validate', '--project', defaultProject, '--item', created.item.id, '--json']) as { valid: boolean; scheduled: boolean; schema_version: string };
+    expect(validation).toEqual(expect.objectContaining({ schema_version: 'lineage.social_validation.v1', valid: true, scheduled: false }));
+    expect(() => runLineageDataCommand('social', ['variant', 'remove', '--project', defaultProject, '--variant', variantId, '--confirm-write', '--json'])).toThrow('expectedRevision is required');
+    expect(() => runLineageDataCommand('social', ['variant', 'remove', '--project', defaultProject, '--variant', variantId, '--expected-revision', '1', '--confirm-write', '--json'])).toThrow('revision conflict');
+    const removed = runLineageDataCommand('social', ['variant', 'remove', '--project', defaultProject, '--variant', variantId, '--expected-revision', '2', '--confirm-write', '--json']) as { item: { variants: Array<{ active: boolean; current_revision: number; revision: { editorial_state: string } }> } };
+    expect(removed.item.variants[0]).toMatchObject({ active: false, current_revision: 3, revision: { editorial_state: 'archived' } });
   });
 
   it('manages lineage task queue commands from the packaged CLI contract', () => {

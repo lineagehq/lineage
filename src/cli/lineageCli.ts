@@ -28,6 +28,8 @@ import {
 } from '../server/assetLineage';
 import { getLineageBrief, linkSelectedLineageChild } from '../server/assetLineageHandoff';
 import { listAssetSocialMarks, markAssetSocial, unmarkAssetSocial } from '../server/social/socialMarks';
+import { addSocialVariant, createSocialWorkItem, editSocialVariant, getSocialWorkItem, removeSocialVariant } from '../server/social/socialWorkItems';
+import { validateSocialWorkItem } from '../server/social/socialValidation';
 import {
   addLineageTaskComment,
   cancelLineageTask,
@@ -317,6 +319,12 @@ Usage:
   ${config.binName} social list --project <project> --root <asset-id> [--db <path>] [--json]
   ${config.binName} social mark --project <project> --root <asset-id> --asset <asset-id-or-exact-title> --confirm-write [--actor <actor>] [--notes <text>] [--claim-token <claim-id.secret>] [--db <path>] [--json]
   ${config.binName} social unmark --project <project> --root <asset-id> --asset <asset-id-or-exact-title> --confirm-write [--actor <actor>] [--claim-token <claim-id.secret>] [--db <path>] [--json]
+  ${config.binName} social item create --project <project> --root <asset-id> --asset <asset-id> [--campaign-key <key>] [--content-post <id>] --confirm-write [--actor <actor>] [--claim-token <claim-id.secret>] [--json]
+  ${config.binName} social item show --project <project> --item <item-id> [--json]
+  ${config.binName} social variant add --project <project> --item <item-id> --channel-id <channel-id> --confirm-write [--actor <actor>] [--claim-token <claim-id.secret>] [--json]
+  ${config.binName} social variant edit --project <project> --variant <variant-id> --expected-revision <number> [--copy <text>] [--hashtag <tag>] [--hashtag-placement caption|first_comment] [--alt-text <text>] [--alt-text-reviewed --alt-text-reviewed-by <actor>] [--publish-method automatic|notification] [--composition-mode customScheduled|addToQueue] [--custom-scheduled-at <zoned-iso-time>] --confirm-write [--actor <actor>] [--claim-token <claim-id.secret>] [--json]
+  ${config.binName} social variant remove --project <project> --variant <variant-id> --expected-revision <number> --confirm-write [--actor <actor>] [--claim-token <claim-id.secret>] [--json]
+  ${config.binName} social validate --project <project> --item <item-id> [--json]
   ${config.binName} tasks list --root <asset-id> [--project <project>] [--db <path>] [--json]
   ${config.binName} tasks inspect --task <task-id> [--project <project>] [--db <path>] [--json]
   ${config.binName} tasks claim --task <task-id> --agent-name <name> [--project <project>] [--db <path>] [--json]
@@ -440,6 +448,41 @@ function positionalArgs(args: string[]): string[] {
     values.push(arg);
   }
   return values;
+}
+
+function assertSocialCliInput(args: string[], _positions: string[], expectedPositions: readonly string[], valueOptions: readonly string[], booleanOptions: readonly string[] = []): void {
+  const values = ['--project', '--db', '--profile', '--asset-root', ...valueOptions];
+  const booleans = ['--json', ...booleanOptions];
+  const positions: string[] = [];
+  const seen = new Set<string>();
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (!arg.startsWith('--')) {
+      positions.push(arg);
+      continue;
+    }
+    const equals = arg.indexOf('=');
+    const name = equals >= 0 ? arg.slice(0, equals) : arg;
+    if (!values.includes(name) && !booleans.includes(name)) throw new Error(`Unknown option ${name}`);
+    if (name !== '--hashtag' && seen.has(name)) throw new Error(`Duplicate option ${name}`);
+    seen.add(name);
+    if (booleans.includes(name)) {
+      if (equals >= 0) throw new Error(`${name} does not accept a value`);
+      continue;
+    }
+    if (equals >= 0) {
+      if (!arg.slice(equals + 1)) throw new Error(`${name} requires a value`);
+      continue;
+    }
+    if (!args[index + 1] || args[index + 1].startsWith('--')) throw new Error(`${name} requires a value`);
+    index += 1;
+  }
+  if (positions.length !== expectedPositions.length || positions.some((position, index) => position !== expectedPositions[index])) {
+    throw new Error(`Unexpected Social command input; expected ${expectedPositions.join(' ')}`);
+  }
+  if (seen.has('--profile') && (seen.has('--db') || seen.has('--asset-root'))) {
+    throw new Error('--profile cannot be combined with --db or --asset-root');
+  }
 }
 
 type GenerationScaffoldFormat = 'jpeg' | 'png' | 'webp';
@@ -907,14 +950,92 @@ export function runLineageDataCommand(command: string, args: string[]): unknown 
     throw new Error(`Unknown reroll command: ${subcommand}`);
   }
   if (command === 'social') {
-    const subcommand = positionalArgs(args)[0] || '';
+    const positions = positionalArgs(args);
+    const subcommand = positions[0] || '';
     const explicitProject = readOption(args, '--project');
     const asset = readOption(args, '--asset');
     if (!explicitProject) throw new Error(`lineage social ${subcommand || 'command'} requires --project`);
+    if (subcommand === 'item') {
+      const operation = positions[1] || '';
+      if (operation === 'show') {
+        assertSocialCliInput(args, positions, ['item', 'show'], ['--item']);
+        const itemId = readOption(args, '--item');
+        if (!itemId) throw new Error('lineage social item show requires --item');
+        return getSocialWorkItem(explicitProject, itemId);
+      }
+      if (operation === 'create') {
+        assertSocialCliInput(args, positions, ['item', 'create'], ['--root', '--asset', '--campaign-key', '--content-post', '--actor', '--claim-token'], ['--confirm-write']);
+        if (!options.rootAssetId) throw new Error('lineage social item create requires --root');
+        if (!asset) throw new Error('lineage social item create requires --asset');
+        return createSocialWorkItem(explicitProject, {
+          actor: readOption(args, '--actor'), campaignKey: readOption(args, '--campaign-key'),
+          claimToken: options.claimToken, confirmWrite: options.confirmWrite,
+          contentPostId: readOption(args, '--content-post'), rootAssetId: options.rootAssetId, sourceAssetId: asset,
+        });
+      }
+      throw new Error(`Unknown social item command: ${operation}`);
+    }
+    if (subcommand === 'variant') {
+      const operation = positions[1] || '';
+      const variantId = readOption(args, '--variant');
+      if (operation === 'add') {
+        assertSocialCliInput(args, positions, ['variant', 'add'], ['--item', '--channel-id', '--actor', '--claim-token'], ['--confirm-write']);
+        const itemId = readOption(args, '--item'); const channelId = readOption(args, '--channel-id');
+        if (!itemId) throw new Error('lineage social variant add requires --item');
+        if (!channelId) throw new Error('lineage social variant add requires --channel-id');
+        return addSocialVariant(explicitProject, { actor: readOption(args, '--actor'), channelId, claimToken: options.claimToken, confirmWrite: options.confirmWrite, itemId });
+      }
+      if (!variantId) throw new Error(`lineage social variant ${operation || 'command'} requires --variant`);
+      if (operation === 'remove') {
+        assertSocialCliInput(args, positions, ['variant', 'remove'], ['--variant', '--expected-revision', '--actor', '--claim-token'], ['--confirm-write']);
+        const expected = readOption(args, '--expected-revision');
+        if (expected === undefined) throw new Error('expectedRevision is required');
+        if (!Number.isInteger(Number(expected)) || Number(expected) < 1) throw new Error('--expected-revision must be a positive integer');
+        return removeSocialVariant(explicitProject, {
+          actor: readOption(args, '--actor'), claimToken: options.claimToken, confirmWrite: options.confirmWrite,
+          expectedRevision: Number(expected), variantId,
+        });
+      }
+      if (operation === 'edit') {
+        assertSocialCliInput(args, positions, ['variant', 'edit'], ['--variant', '--expected-revision', '--copy', '--hashtag', '--hashtag-placement', '--alt-text', '--alt-text-reviewed-by', '--publish-method', '--composition-mode', '--custom-scheduled-at', '--actor', '--claim-token'], ['--alt-text-reviewed', '--confirm-write']);
+        const placement = readOption(args, '--hashtag-placement');
+        if (placement && placement !== 'caption' && placement !== 'first_comment') throw new Error('--hashtag-placement must be caption or first_comment');
+        const method = readOption(args, '--publish-method');
+        if (method && method !== 'automatic' && method !== 'notification') throw new Error('--publish-method must be automatic or notification');
+        const mode = readOption(args, '--composition-mode');
+        if (mode && mode !== 'customScheduled' && mode !== 'addToQueue') throw new Error('--composition-mode must be customScheduled or addToQueue');
+        const expected = readOption(args, '--expected-revision');
+        if (expected === undefined) throw new Error('expectedRevision is required');
+        if (!Number.isInteger(Number(expected)) || Number(expected) < 1) throw new Error('--expected-revision must be a positive integer');
+        return editSocialVariant(explicitProject, {
+          actor: readOption(args, '--actor'), altText: readOption(args, '--alt-text'),
+          altTextReviewed: args.includes('--alt-text-reviewed') ? true : undefined,
+          altTextReviewedBy: readOption(args, '--alt-text-reviewed-by'), claimToken: options.claimToken,
+          compositionMode: mode as 'customScheduled' | 'addToQueue' | undefined, confirmWrite: options.confirmWrite,
+          copy: readOption(args, '--copy'), customScheduledAt: readOption(args, '--custom-scheduled-at'),
+          expectedRevision: Number(expected),
+          hashtagPlacement: placement as 'caption' | 'first_comment' | undefined,
+          hashtags: args.some(arg => arg === '--hashtag' || arg.startsWith('--hashtag=')) ? readOptions(args, '--hashtag') : undefined,
+          publishMethod: method as 'automatic' | 'notification' | undefined, variantId,
+        });
+      }
+      throw new Error(`Unknown social variant command: ${operation}`);
+    }
+    if (subcommand === 'validate') {
+      assertSocialCliInput(args, positions, ['validate'], ['--item']);
+      const itemId = readOption(args, '--item');
+      if (!itemId) throw new Error('lineage social validate requires --item');
+      return validateSocialWorkItem(explicitProject, itemId);
+    }
+    if (subcommand === 'list') {
+      assertSocialCliInput(args, positions, ['list'], ['--root']);
+      if (!options.rootAssetId) throw new Error('lineage social list requires --root');
+      return listAssetSocialMarks(explicitProject, options.rootAssetId);
+    }
     if (!options.rootAssetId) throw new Error(`lineage social ${subcommand || 'command'} requires --root`);
-    if (subcommand === 'list') return listAssetSocialMarks(explicitProject, options.rootAssetId);
     if (!asset) throw new Error(`lineage social ${subcommand || 'command'} requires --asset`);
     if (subcommand === 'mark') {
+      assertSocialCliInput(args, positions, ['mark'], ['--root', '--asset', '--actor', '--notes', '--claim-token'], ['--confirm-write']);
       return markAssetSocial(explicitProject, {
         asset,
         claimToken: options.claimToken,
@@ -925,6 +1046,7 @@ export function runLineageDataCommand(command: string, args: string[]): unknown 
       });
     }
     if (subcommand === 'unmark') {
+      assertSocialCliInput(args, positions, ['unmark'], ['--root', '--asset', '--actor', '--claim-token'], ['--confirm-write']);
       return unmarkAssetSocial(explicitProject, {
         asset,
         claimToken: options.claimToken,
@@ -1067,6 +1189,17 @@ export function printDataResult(command: string, result: unknown, json: boolean)
     }
   }
   if (command === 'social' && result && typeof result === 'object') {
+    if ('item' in result) {
+      const response = result as { idempotent?: boolean; item: { id: string; campaign_key: string; variants: unknown[] } };
+      console.log(`${response.idempotent ? 'Opened' : 'Social Work Item'} ${response.item.id} (${response.item.campaign_key}); ${response.item.variants.length} variant(s)`);
+      return;
+    }
+    if ('issues' in result) {
+      const validation = result as { valid: boolean; issues: Array<{ field: string; message: string }> };
+      console.log(`Composition ${validation.valid ? 'valid' : 'needs changes'}; ${validation.issues.length} issue(s)`);
+      for (const issue of validation.issues) console.log(`${issue.field}: ${issue.message}`);
+      return;
+    }
     if ('marks' in result) {
       const listed = result as { marks: Array<{ asset_id: string; title: string; warnings?: string[] }> };
       console.log(`${listed.marks.length} social-marked asset(s)`);
@@ -1287,7 +1420,11 @@ export function lineageCliRequiresWriterLease(command: string, args: string[]): 
   }
   if (command === 'generate') return positions[0] !== 'image' || positions[1] !== 'inspect';
   if (command === 'reroll') return subcommand !== 'list';
-  if (command === 'social') return subcommand !== 'list';
+  if (command === 'social') {
+    if (subcommand === 'list' || subcommand === 'validate') return false;
+    if (subcommand === 'item') return positions[1] !== 'show';
+    return true;
+  }
   if (command === 'tasks') return subcommand !== 'list' && subcommand !== 'inspect';
   if (command === 'db') return subcommand !== 'info';
   if (command === 'agent') return subcommand !== 'status' && subcommand !== 'graph' && subcommand !== 'inspect';
@@ -1301,7 +1438,11 @@ export function lineageCliCanDelegateMutation(command: string, args: string[]): 
   if (command === 'output-targets') return subcommand === 'node' && ['set', 'replace', 'clear'].includes(positions[1] || '');
   if (command === 'generate') return positions[0] === 'image' && ['plan', 'scaffold', 'import', 'cancel'].includes(positions[1] || '');
   if (command === 'reroll') return ['mark', 'cancel', 'plan', 'import'].includes(subcommand);
-  if (command === 'social') return ['mark', 'unmark'].includes(subcommand);
+  if (command === 'social') {
+    if (['mark', 'unmark'].includes(subcommand)) return true;
+    return subcommand === 'item' && positions[1] === 'create'
+      || subcommand === 'variant' && ['add', 'edit', 'remove'].includes(positions[1] || '');
+  }
   if (command === 'tasks') return ['claim', 'start', 'comment', 'cancel', 'override', 'instructions'].includes(subcommand);
   if (command === 'agent') return ['claim', 'heartbeat', 'release', 'revoke', 'transfer'].includes(subcommand);
   return false;

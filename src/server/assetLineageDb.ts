@@ -519,6 +519,73 @@ export function lineageDb(): DatabaseSync {
       primary key(project_id, channel_id)
     );
     create index if not exists buffer_channels_project_available on buffer_channels(project_id, available, display_name);
+    create table if not exists social_work_items (
+      id text primary key,
+      project_id text not null references projects(id),
+      root_asset_id text not null references assets(id),
+      source_asset_id text not null references assets(id),
+      source_checksum_sha256 text,
+      campaign_key text not null,
+      content_post_id text,
+      editorial_state text not null check (editorial_state in ('active', 'archived')),
+      created_by text not null,
+      created_at text not null,
+      updated_at text not null,
+      archived_at text,
+      unique(project_id, root_asset_id, source_asset_id, campaign_key),
+      foreign key(project_id, content_post_id) references content_posts(project_id, id)
+    );
+    create index if not exists social_work_items_project_root on social_work_items(project_id, root_asset_id, updated_at);
+    create table if not exists social_variants (
+      id text primary key,
+      item_id text not null references social_work_items(id) on delete cascade,
+      project_id text not null references projects(id),
+      channel_id text not null,
+      editorial_state text not null check (editorial_state in ('draft', 'needs_review', 'ready', 'archived')),
+      active integer not null check (active in (0, 1)),
+      current_revision integer not null check (current_revision > 0),
+      created_at text not null,
+      updated_at text not null,
+      archived_at text
+    );
+    create unique index if not exists social_variants_one_active_channel on social_variants(item_id, channel_id) where active = 1;
+    create index if not exists social_variants_project_item on social_variants(project_id, item_id, updated_at);
+    create table if not exists social_variant_revisions (
+      id text primary key,
+      variant_id text not null references social_variants(id) on delete cascade,
+      revision integer not null check (revision > 0),
+      copy text not null,
+      hashtag_placement text not null check (hashtag_placement in ('caption', 'first_comment')),
+      alt_text text,
+      alt_text_reviewed integer not null check (alt_text_reviewed in (0, 1)),
+      alt_text_reviewed_by text,
+      alt_text_reviewed_at text,
+      editorial_state text not null check (editorial_state in ('draft', 'needs_review', 'ready', 'archived')),
+      publish_method text not null check (publish_method in ('automatic', 'notification')),
+      composition_mode text check (composition_mode in ('customScheduled', 'addToQueue')),
+      custom_scheduled_at text,
+      channel_fingerprint text not null,
+      revision_hash text not null,
+      created_by text not null,
+      created_at text not null,
+      unique(variant_id, revision),
+      check (
+        (alt_text_reviewed = 0 and alt_text_reviewed_by is null and alt_text_reviewed_at is null)
+        or (alt_text_reviewed = 1 and alt_text is not null and alt_text_reviewed_by is not null and alt_text_reviewed_at is not null)
+      ),
+      check (
+        (composition_mode = 'customScheduled' and custom_scheduled_at is not null)
+        or (composition_mode is null and custom_scheduled_at is null)
+        or (composition_mode = 'addToQueue' and custom_scheduled_at is null)
+      )
+    );
+    create table if not exists social_hashtags (
+      revision_id text not null references social_variant_revisions(id) on delete cascade,
+      position integer not null check (position >= 0),
+      value text not null,
+      primary key(revision_id, position),
+      unique(revision_id, value)
+    );
     create table if not exists lineage_tasks (
       id text primary key,
       project_id text not null references projects(id),
@@ -608,6 +675,7 @@ export function lineageDb(): DatabaseSync {
   ensureReviewStateValues(database);
   ensureAgentClaimScopeValues(database);
   ensureGenerationReceiptCheckValues(database);
+  ensureSocialVariantRevisionSchema(database);
   return database;
 }
 
@@ -793,6 +861,66 @@ function ensureAgentClaimScopeValues(database: DatabaseSync): void {
 function tableCreateSql(database: DatabaseSync, table: string): string {
   const row = database.prepare("select sql from sqlite_master where type = 'table' and name = ?").get(table) as { sql?: string } | undefined;
   return row?.sql || '';
+}
+
+function ensureSocialVariantRevisionSchema(database: DatabaseSync): void {
+  const sql = tableCreateSql(database, 'social_variant_revisions');
+  if (!sql || (!sql.includes('network_metadata_json')
+    && sql.includes('editorial_state text not null')
+    && !sql.includes('unique(variant_id, revision_hash)')
+    && sql.includes("composition_mode = 'customScheduled' and custom_scheduled_at is not null")
+    && sql.includes('alt_text_reviewed = 1 and alt_text is not null'))) return;
+
+  const existingRows = Number((database.prepare('select count(*) count from social_variant_revisions').get() as { count: number }).count);
+  if (existingRows > 0) {
+    database.close();
+    throw new Error('Social variant revision schema contains open metadata or lacks editorial-state history; refusing destructive migration of existing immutable revisions');
+  }
+
+  database.exec('PRAGMA foreign_keys = OFF; PRAGMA legacy_alter_table = ON; BEGIN IMMEDIATE');
+  try {
+    database.exec(`
+      alter table social_variant_revisions rename to social_variant_revisions_old;
+      create table social_variant_revisions (
+        id text primary key,
+        variant_id text not null references social_variants(id) on delete cascade,
+        revision integer not null check (revision > 0),
+        copy text not null,
+        hashtag_placement text not null check (hashtag_placement in ('caption', 'first_comment')),
+        alt_text text,
+        alt_text_reviewed integer not null check (alt_text_reviewed in (0, 1)),
+        alt_text_reviewed_by text,
+        alt_text_reviewed_at text,
+        editorial_state text not null check (editorial_state in ('draft', 'needs_review', 'ready', 'archived')),
+        publish_method text not null check (publish_method in ('automatic', 'notification')),
+        composition_mode text check (composition_mode in ('customScheduled', 'addToQueue')),
+        custom_scheduled_at text,
+        channel_fingerprint text not null,
+        revision_hash text not null,
+        created_by text not null,
+        created_at text not null,
+        unique(variant_id, revision),
+        check (
+          (alt_text_reviewed = 0 and alt_text_reviewed_by is null and alt_text_reviewed_at is null)
+          or (alt_text_reviewed = 1 and alt_text is not null and alt_text_reviewed_by is not null and alt_text_reviewed_at is not null)
+        ),
+        check (
+          (composition_mode = 'customScheduled' and custom_scheduled_at is not null)
+          or (composition_mode is null and custom_scheduled_at is null)
+          or (composition_mode = 'addToQueue' and custom_scheduled_at is null)
+        )
+      );
+      drop table social_variant_revisions_old;
+    `);
+    const violations = database.prepare('pragma foreign_key_check').all();
+    if (violations.length > 0) throw new Error(`Social variant revision migration failed foreign key check: ${JSON.stringify(violations)}`);
+    database.exec('COMMIT');
+  } catch (error) {
+    database.exec('ROLLBACK');
+    throw error;
+  } finally {
+    database.exec('PRAGMA legacy_alter_table = OFF; PRAGMA foreign_keys = ON');
+  }
 }
 
 function ensureGenerationReceiptCheckValues(database: DatabaseSync): void {

@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
-import { existsSync, statSync } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
+import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { listAssets, repoRoot, validateProject } from './assetCore';
 import { getLineageSnapshot } from './assetLineage';
-import { lineageDb, lineageDbPath } from './assetLineageDb';
+import { lineageDb, lineageDbPath, type DatabaseSync } from './assetLineageDb';
 import { loadAssetOutputSpec } from './generationTargetPersistence';
 import {
   nodeTargetResolutionsDigest,
@@ -381,6 +381,118 @@ function requireV2CurrentAttempt(
     id: attempt.id,
     is_current: attempt.is_current,
     source: attempt.source,
+  };
+}
+
+export interface LineageCurrentAttemptIdentity {
+  root_asset_id: string;
+  node_asset_id: string;
+  attempt_id: string;
+  asset_id: string;
+  attempt_index: number;
+  checksum_sha256: string;
+  source: LineageSelectionPacketV2Attempt['source'];
+  attempt_asset_id: string;
+  local_reference: string;
+  local_file_path: string;
+}
+
+export function lineageCurrentAttemptIdentityForNodeInDatabase(
+  database: DatabaseSync,
+  project: string,
+  rootAssetId: string,
+  nodeAssetId: string,
+): LineageCurrentAttemptIdentity {
+  const member = database.prepare(`
+    with recursive descendants(asset_id) as (
+      select ?
+      union
+      select edges.child_asset_id from asset_edges edges join descendants on edges.parent_asset_id=descendants.asset_id
+      where edges.project_id=? and edges.relation_type='derived_from'
+    ) select asset_id from descendants where asset_id=?
+  `).get(rootAssetId, project, nodeAssetId);
+  if (!member) throw new LineageSelectionPacketError(`Asset ${nodeAssetId} is not in lineage ${rootAssetId}.`, [], ['asset_outside_workspace']);
+  const attempt = database.prepare(`select id, asset_id, attempt_index, source, file_path, checksum_sha256 from asset_attempts where project_id=? and node_asset_id=? and is_current=1`)
+    .get(project, nodeAssetId) as { id: string; asset_id: string; attempt_index: number; source: LineageCurrentAttemptIdentity['source']; file_path: string | null; checksum_sha256: string | null } | undefined;
+  const asset = database.prepare('select local_path, checksum_sha256 from assets where project_id=? and id=?').get(project, nodeAssetId) as { local_path: string | null; checksum_sha256: string | null } | undefined;
+  const resolved = attempt || (asset ? {
+    id: `${project}:${nodeAssetId}:attempt:implicit`, asset_id: nodeAssetId, attempt_index: 1,
+    source: 'initial' as const, file_path: asset.local_path, checksum_sha256: asset.checksum_sha256,
+  } : undefined);
+  if (!resolved || !resolved.checksum_sha256 || !SHA256_PATTERN.test(resolved.checksum_sha256)) {
+    throw new LineageSelectionPacketError(`Selected asset ${nodeAssetId} current attempt does not have a valid lowercase SHA-256 checksum.`, [], ['current_attempt_invalid_checksum']);
+  }
+  if (!resolved.file_path) throw new LineageSelectionPacketError(`Selected asset ${nodeAssetId} current attempt has no local file.`, [], ['current_attempt_local_file_missing']);
+  if (!isAbsolute(resolved.file_path) && resolved.file_path.split(/[\\/]/).includes('..')) {
+    throw new LineageSelectionPacketError(`Selected asset ${nodeAssetId} current attempt local reference is not owned.`, [], ['current_attempt_local_file_unowned']);
+  }
+  const localPath = resolveLocalReference(resolved.file_path);
+  if (!localPath || !existsSync(localPath)) throw new LineageSelectionPacketError(`Selected asset ${nodeAssetId} current attempt local file is missing.`, [], ['current_attempt_local_file_missing']);
+  const root = realpathSync(repoRoot);
+  try {
+    const lexicalPath = relative(resolve(repoRoot), localPath);
+    if (lexicalPath === '..' || lexicalPath.startsWith(`..${sep}`) || isAbsolute(lexicalPath)) throw new Error('unowned');
+    let cursor = resolve(repoRoot);
+    for (const segment of lexicalPath.split(sep)) {
+      cursor = resolve(cursor, segment);
+      const info = lstatSync(cursor);
+      if (info.isSymbolicLink()) throw new Error('unowned');
+    }
+    const fd = openSync(localPath, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+    try {
+      const descriptor = fstatSync(fd);
+      if (!descriptor.isFile()) throw new Error('non-file');
+      const realFile = realpathSync(localPath);
+      const fromRoot = relative(root, realFile);
+      if (fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) throw new Error('unowned');
+      const pathname = statSync(localPath);
+      if (pathname.dev !== descriptor.dev || pathname.ino !== descriptor.ino) throw new Error('changed');
+      const actualChecksum = createHash('sha256').update(readFileSync(fd)).digest('hex');
+      if (actualChecksum !== resolved.checksum_sha256) {
+        throw new LineageSelectionPacketError(`Selected asset ${nodeAssetId} current attempt checksum does not match its local file.`, [], ['current_attempt_checksum_mismatch']);
+      }
+    } finally { closeSync(fd); }
+  } catch (error) {
+    if (error instanceof LineageSelectionPacketError) throw error;
+    throw new LineageSelectionPacketError(`Selected asset ${nodeAssetId} current attempt local file is not an owned regular file.`, [], ['current_attempt_local_file_unowned']);
+  }
+  return {
+    root_asset_id: rootAssetId, node_asset_id: nodeAssetId, attempt_id: resolved.id,
+    asset_id: resolved.asset_id, attempt_index: Number(resolved.attempt_index),
+    checksum_sha256: resolved.checksum_sha256, source: resolved.source,
+    attempt_asset_id: resolved.asset_id, local_reference: resolved.file_path, local_file_path: localPath,
+  };
+}
+
+/** Resolves the current immutable attempt for an explicit node, independent of Canvas selection. */
+export function lineageCurrentAttemptIdentityForNode(
+  project: string,
+  rootAssetId: string,
+  nodeAssetId: string,
+): LineageCurrentAttemptIdentity {
+  const snapshot = getLineageSnapshot(project, rootAssetId);
+  const node = snapshot.nodes.find(candidate => candidate.asset_id === nodeAssetId);
+  if (!node) throw new LineageSelectionPacketError(`Asset ${nodeAssetId} is not in lineage ${rootAssetId}.`, [], ['asset_outside_workspace']);
+  const warnings: string[] = [];
+  const errors: string[] = [];
+  const diagnostics: LineageSelectionPacketDiagnostic[] = [];
+  const catalogAssets = listAllAssets(project);
+  const catalogById = new Map(catalogAssets.map(asset => [asset.asset_id, asset]));
+  const resolved = assetForNodeV2(node, catalogById.get(nodeAssetId), catalogById, warnings, errors, diagnostics);
+  const localReference = resolved.current_attempt.file_path;
+  const localFilePath = resolveLocalReference(localReference);
+  if (!localReference || !localFilePath) throw new LineageSelectionPacketError(`Selected asset ${nodeAssetId} current attempt has no local file.`, [], ['current_attempt_local_file_missing']);
+  return {
+    root_asset_id: rootAssetId,
+    node_asset_id: nodeAssetId,
+    attempt_id: resolved.current_attempt.id,
+    asset_id: resolved.current_attempt.asset_id,
+    attempt_index: resolved.current_attempt.attempt_index,
+    checksum_sha256: resolved.current_attempt.checksum_sha256,
+    source: resolved.current_attempt.source,
+    attempt_asset_id: resolved.current_attempt.asset_id,
+    local_reference: localReference,
+    local_file_path: localFilePath,
   };
 }
 

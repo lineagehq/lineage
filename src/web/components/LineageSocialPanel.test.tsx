@@ -8,14 +8,20 @@ import { ApiError, api } from '../api';
 import { LineageSocialPanel } from './LineageSocialPanel';
 
 vi.mock('../api', () => ({ ApiError: class ApiError extends Error { constructor(message: string, public status: number, public payload?: unknown) { super(message); } }, api: vi.fn() }));
+vi.mock('../../server/profileWriterLease', async importOriginal => ({ ...(await importOriginal<typeof import('../../server/profileWriterLease')>()), assertProfileWriterLeaseHeld: vi.fn() }));
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
-afterEach(() => { if (root) act(() => root?.unmount()); root = null; container?.remove(); container = null; vi.clearAllMocks(); });
+afterEach(() => {
+  if (root) act(() => root?.unmount()); root = null; container?.remove(); container = null;
+  for (const key of ['LINEAGE_DB', 'LINEAGE_ASSET_ROOT', 'LINEAGE_CHANNEL', 'LINEAGE_PROFILE_ENVIRONMENT', 'LINEAGE_PROFILE_ID', 'LINEAGE_GATE5_QA']) delete process.env[key];
+  vi.clearAllMocks();
+});
 const node: LineageNode = { asset_id: 'asset-1', checksum_sha256: 'abc123', is_latest: true, media_type: 'image', project: 'demo', review_state: 'approved', source: 'local', status: 'working', title: 'Source image', user_selected: false, social_mark: { active: true, asset_id: 'asset-1', id: 'mark-1', marked_at: '2026-08-12T00:00:00Z', marked_by: 'human', project_id: 'demo', root_asset_id: 'root-1', updated_at: '2026-08-12T00:00:00Z' } };
 const channel = { channel_id: 'channel-1', service: 'instagram', display_name: 'Studio Instagram', timezone: 'America/Phoenix', disconnected: false, locked: false, paused: false, available: true, capability: { automatic: true, image_post: true, notification: true, scheduling_modes: ['customScheduled', 'addToQueue'], supported: true, reason: null }, synced_at: '2026-08-12T00:00:00Z', stale_at: null } as const;
 function variant(revision = 1, copy = ''): SocialVariant { return { id: 'variant-1', item_id: 'item-1', project_id: 'demo', channel_id: 'channel-1', editorial_state: 'draft', active: true, current_revision: revision, created_at: '2026-08-12T00:00:00Z', updated_at: '2026-08-12T00:00:00Z', revision: { id: `revision-${revision}`, variant_id: 'variant-1', revision, copy, hashtags: [], hashtag_placement: 'caption', alt_text_reviewed: false, editorial_state: 'draft', publish_method: 'automatic', channel_fingerprint: 'fingerprint', revision_hash: `hash-${revision}`, created_by: 'human', created_at: '2026-08-12T00:00:00Z' } }; }
 function persistedVariant(): SocialVariant { const value = variant(4, 'Persisted caption'); return { ...value, editorial_state: 'needs_review', revision: { ...value.revision, hashtags: [{ position: 0, value: 'first' }, { position: 1, value: 'second' }], hashtag_placement: 'first_comment', alt_text: 'Reviewed description', alt_text_reviewed: true, alt_text_reviewed_by: 'Editor', alt_text_reviewed_at: '2026-08-12T01:00:00Z', editorial_state: 'needs_review', publish_method: 'notification', composition_mode: 'customScheduled', custom_scheduled_at: '2026-08-15T09:30:00-07:00' } }; }
+function readyVariant(): SocialVariant { const value = variant(2, 'Ready caption'); return { ...value, editorial_state: 'ready', revision: { ...value.revision, editorial_state: 'ready', composition_mode: 'addToQueue', revision_hash: 'a'.repeat(64) } }; }
 function item(variants: SocialVariant[] = []): SocialWorkItem { return { id: 'item-1', project_id: 'demo', root_asset_id: 'root-1', source_asset_id: 'asset-1', campaign_key: 'default', editorial_state: 'active', created_by: 'human', created_at: '2026-08-12T00:00:00Z', updated_at: '2026-08-12T00:00:00Z', variants }; }
 async function flush() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); }
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (reason: unknown) => void; const promise = new Promise<T>((next, fail) => { resolve = next; reject = fail; }); return { promise, reject, resolve }; }
@@ -520,4 +526,90 @@ describe('LineageSocialPanel', () => {
     expect([...container.querySelectorAll<HTMLInputElement>('input[type="radio"]')].find(input => input.checked)?.parentElement?.textContent).toContain('Notification');
     expect(container.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked).toBe(true);
   });
+
+  it('shows exact preview pins and prepares one immutable agent brief despite double clicks', async () => {
+    const preview = {
+      schema_version: 'lineage.social_delivery_preview.v1', preview_sha256: 'b'.repeat(64), project: 'demo', item_id: 'item-1',
+      workspace_channel: 'instagram', variant_id: 'variant-1', revision_id: 'revision-2', revision: 2, revision_sha256: 'a'.repeat(64),
+      root_asset_id: 'root-1', source_asset_id: 'asset-1', source_attempt_id: 'attempt-1', source_checksum_sha256: 'c'.repeat(64),
+      channel_id: 'channel-1', channel_fingerprint: 'channel-fingerprint', capability_fingerprint: 'd'.repeat(64),
+      connection_fingerprint: 'e'.repeat(64), publish_method: 'automatic', composition_mode: 'addToQueue',
+    } as const;
+    vi.mocked(api).mockImplementation((path: string, options?: RequestInit) => {
+      if (path.includes('/connection?')) return Promise.resolve({ ok: true, connection: { project: 'demo', organization_id: 'org-1', health_state: 'connected', channel_synced_at: '2026-08-12T00:00:00Z', updated_at: '2026-08-12T00:00:00Z' } });
+      if (path.includes('/channels?')) return Promise.resolve({ ok: true, channels: [channel] });
+      if (path === '/api/social/items') return Promise.resolve({ schema_version: 'lineage.social_work_item.v1', item: item([readyVariant()]) });
+      if (path.endsWith('/delivery-preview')) return Promise.resolve(preview);
+      if (path.endsWith('/agent-handoff')) {
+        expect(JSON.parse(String(options?.body))).toEqual({ project: 'demo', expectedRevision: 2, previewSha256: preview.preview_sha256 });
+        return Promise.resolve({
+          schema_version: 'lineage.social_agent_handoff.v1', handoff_id: '9'.repeat(64), preview_sha256: preview.preview_sha256,
+          project: 'demo', variant_id: 'variant-1', revision_id: 'revision-2', revision: 2, buffer_url: 'https://publish.buffer.com/channels/channel-1/schedule',
+          channel: { id: 'channel-1', display_name: 'Bleep LinkedIn', service: 'linkedin' }, caption: 'Caption', hashtags: ['lineage'],
+          hashtag_placement: 'caption', rendered_text: 'Caption\n\n#lineage', alt_text: 'Alt text', publish_method: 'automatic', composition_mode: 'addToQueue',
+          media: { local_file_path: '/safe/image.png', local_reference: 'image.png', content_type: 'image/png', checksum_sha256: 'c'.repeat(64), rendition_sha256: 'f'.repeat(64), width: 1200, height: 628, size_bytes: 4 },
+          confirmation_policy: 'explicit_operator_confirmation_in_buffer', agent_brief_markdown: '# Lineage social publishing brief\nExact immutable agent brief',
+        });
+      }
+      if (path.endsWith('/provider-post') && options?.method === 'POST') {
+        expect(JSON.parse(String(options.body))).toEqual({ project: 'demo', expectedRevision: 2, previewSha256: preview.preview_sha256, providerPostId: 'buffer-post-1', confirmWrite: true });
+        return Promise.resolve({ schema_version: 'lineage.social_provider_post_insights.v1', link_id: 'link-1', provider_post_id: 'buffer-post-1', project: 'demo', variant_id: 'variant-1', revision: 2, preview_sha256: preview.preview_sha256, channel_id: 'channel-1', status: 'sent', external_link: 'https://linkedin.com/feed/update/post-1', metrics: [{ type: 'impressions', name: 'Impressions', value: 120, unit: 'count' }], metrics_updated_at: '2026-08-22T12:00:00.000Z', observed_at: '2026-08-22T13:00:00.000Z', stale: false, idempotent: false });
+      }
+      if (path.endsWith('/provider-post/sync')) {
+        expect(JSON.parse(String(options?.body))).toEqual({ project: 'demo', confirmWrite: true });
+        return Promise.resolve({ schema_version: 'lineage.social_provider_post_insights.v1', link_id: 'link-1', provider_post_id: 'buffer-post-1', project: 'demo', variant_id: 'variant-1', revision: 2, preview_sha256: preview.preview_sha256, channel_id: 'channel-1', status: 'sent', external_link: 'https://linkedin.com/feed/update/post-1', metrics: [{ type: 'impressions', name: 'Impressions', value: 140, unit: 'count' }], metrics_updated_at: '2026-08-23T12:00:00.000Z', observed_at: '2026-08-23T13:00:00.000Z', stale: false, idempotent: false });
+      }
+      return Promise.reject(new Error(`Unexpected ${path}`));
+    });
+    container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+    act(() => root!.render(createElement(LineageSocialPanel, { node, onClose: vi.fn(), onMark: vi.fn(), project: 'demo', rootAssetId: 'root-1' })));
+    await flush();
+    act(() => [...container!.querySelectorAll('button')].find(button => button.textContent === 'Create or open work item')!.click()); await flush();
+    act(() => [...container!.querySelectorAll('button')].find(button => button.textContent === 'Preview agent brief')!.click()); await flush();
+    expect(container.textContent).toContain('r2');
+    expect(container.textContent).toContain('channel-1');
+    expect(container.textContent).toContain('attempt-1');
+    expect(container.textContent).toContain(preview.capability_fingerprint);
+    const confirm = [...container.querySelectorAll('button')].find(button => button.textContent === 'Prepare agent brief')!;
+    act(() => { confirm.click(); confirm.click(); });
+    await flush();
+    expect(vi.mocked(api).mock.calls.filter(([path]) => String(path).endsWith('/agent-handoff'))).toHaveLength(1);
+    expect(container.textContent).toContain('Nothing was uploaded or scheduled');
+    expect(container.querySelector<HTMLTextAreaElement>('textarea[readonly]')?.value).toContain('Exact immutable agent brief');
+    expect([...container.querySelectorAll('a')].find(link => link.textContent === 'Open exact Buffer channel')?.getAttribute('href')).toBe('https://publish.buffer.com/channels/channel-1/schedule');
+    const postId = [...container.querySelectorAll('label')].find(label => label.textContent?.includes('Buffer post ID'))!.querySelector('input')!;
+    act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(postId, 'buffer-post-1'); postId.dispatchEvent(new Event('change', { bubbles: true })); });
+    const linkPost = [...container.querySelectorAll('button')].find(button => button.textContent === 'Verify and link Buffer post')!;
+    act(() => { linkPost.click(); linkPost.click(); }); await flush();
+    expect(vi.mocked(api).mock.calls.filter(([path]) => String(path).endsWith('/provider-post'))).toHaveLength(1);
+    expect(container.textContent).toContain('Impressions120'); expect(container.textContent).toContain('No Buffer write occurred');
+    act(() => [...container!.querySelectorAll('button')].find(button => button.textContent === 'Sync Buffer status and metrics')!.click()); await flush();
+    expect(container.textContent).toContain('Impressions140');
+  });
+
+  it('discards pending provider insights and post IDs when the selected variant changes', async () => {
+    const secondChannel = { ...channel, channel_id: 'channel-2', display_name: 'Second channel' };
+    const secondVariant = { ...readyVariant(), id: 'variant-2', channel_id: 'channel-2', revision: { ...readyVariant().revision, id: 'revision-variant-2', variant_id: 'variant-2' } };
+    const pendingInsights = deferred<{ ok: true; insights: { schema_version: 'lineage.social_provider_post_insights.v1'; link_id: string; provider_post_id: string; project: string; variant_id: string; revision: number; preview_sha256: string; channel_id: string; status: 'sent'; metrics: []; observed_at: string; stale: boolean; idempotent: boolean } }>();
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path.includes('/connection?')) return Promise.resolve({ ok: true, connection: { project: 'demo', organization_id: 'org-1', health_state: 'connected', channel_synced_at: '2026-08-12T00:00:00Z', updated_at: '2026-08-12T00:00:00Z' } });
+      if (path.includes('/channels?')) return Promise.resolve({ ok: true, channels: [channel, secondChannel] });
+      if (path === '/api/social/items') return Promise.resolve({ schema_version: 'lineage.social_work_item.v1', item: item([readyVariant(), secondVariant]) });
+      if (path.includes('/variants/variant-1/provider-post?')) return pendingInsights.promise;
+      return Promise.reject(new Error(`Unexpected ${path}`));
+    });
+    container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+    act(() => root!.render(createElement(LineageSocialPanel, { node, onClose: vi.fn(), onMark: vi.fn(), project: 'demo', rootAssetId: 'root-1' })));
+    await flush();
+    act(() => [...container!.querySelectorAll('button')].find(button => button.textContent === 'Create or open work item')!.click()); await flush();
+    const postId = [...container.querySelectorAll('label')].find(label => label.textContent?.includes('Buffer post ID'))!.querySelector('input')!;
+    act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(postId, 'post-for-variant-1'); postId.dispatchEvent(new Event('change', { bubbles: true })); });
+    act(() => [...container!.querySelectorAll('button')].find(button => button.textContent === 'Load linked Buffer status')!.click());
+    act(() => [...container!.querySelectorAll('button')].find(button => button.textContent?.startsWith('Second channel'))!.click());
+    expect((([...container.querySelectorAll('label')].find(label => label.textContent?.includes('Buffer post ID'))!.querySelector('input')) as HTMLInputElement).value).toBe('');
+    await act(async () => pendingInsights.resolve({ ok: true, insights: { schema_version: 'lineage.social_provider_post_insights.v1', link_id: 'link-1', provider_post_id: 'post-for-variant-1', project: 'demo', variant_id: 'variant-1', revision: 2, preview_sha256: 'b'.repeat(64), channel_id: 'channel-1', status: 'sent', metrics: [], observed_at: '2026-08-22T13:00:00.000Z', stale: false, idempotent: true } }));
+    expect(container.textContent).not.toContain('post-for-variant-1');
+    expect(container.textContent).toContain('Second channel · r2');
+  });
+
 });

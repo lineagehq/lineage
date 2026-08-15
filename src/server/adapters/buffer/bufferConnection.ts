@@ -24,7 +24,12 @@ export interface BufferConnection {
 function digest(value: unknown): string { return createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
 const bufferCredentialEnvironmentKey = ['BUFFER', 'API', 'KEY'].join('_');
 export const BUFFER_SCHEMA_FINGERPRINT = digest(BUFFER_SCHEMA_HASHES);
-function bufferConnectionFingerprint(organizationId: string): string { return digest({ organizationId, cli: BUFFER_CLI_VERSION, schemas: BUFFER_SCHEMA_HASHES }); }
+function bufferConnectionFingerprint(organizationId: string, credentialRef: string): string {
+  return digest({ organizationId, credentialRef, cli: BUFFER_CLI_VERSION, schemas: BUFFER_SCHEMA_HASHES });
+}
+function legacyBufferConnectionFingerprint(organizationId: string): string {
+  return digest({ organizationId, cli: BUFFER_CLI_VERSION, schemas: BUFFER_SCHEMA_HASHES });
+}
 
 function assertBufferRuntimeEvidence(evidence: BufferRuntimeEvidence): void {
   if (evidence.cli_version !== BUFFER_CLI_VERSION || evidence.schema_fingerprint !== BUFFER_SCHEMA_FINGERPRINT || JSON.stringify(evidence.schema_hashes) !== JSON.stringify(BUFFER_SCHEMA_HASHES)) {
@@ -32,11 +37,18 @@ function assertBufferRuntimeEvidence(evidence: BufferRuntimeEvidence): void {
   }
 }
 
-export function assertBufferConnectionFingerprint(connection: BufferConnection, evidence: BufferRuntimeEvidence): void {
+export function assertBufferConnectionFingerprint(connection: BufferConnection, evidence: BufferRuntimeEvidence): 'current' | 'legacy' {
   assertBufferRuntimeEvidence(evidence);
-  if (connection.cli_version !== evidence.cli_version || connection.schema_fingerprint !== evidence.schema_fingerprint || connection.connection_fingerprint !== bufferConnectionFingerprint(connection.organization_id)) {
+  if (connection.cli_version !== evidence.cli_version || connection.schema_fingerprint !== evidence.schema_fingerprint) {
     throw new BufferConnectionError('Stored Buffer connection fingerprint mismatch', 409);
   }
+  if (connection.connection_fingerprint === bufferConnectionFingerprint(connection.organization_id, connection.credential_ref)) return 'current';
+  if (connection.connection_fingerprint === legacyBufferConnectionFingerprint(connection.organization_id)) return 'legacy';
+  throw new BufferConnectionError('Stored Buffer connection fingerprint mismatch', 409);
+}
+
+export function currentBufferConnectionFingerprint(connection: Pick<BufferConnection, 'organization_id' | 'credential_ref'>): string {
+  return bufferConnectionFingerprint(connection.organization_id, connection.credential_ref);
 }
 
 function ensureProject(database: DatabaseSync, project: string): void {
@@ -47,11 +59,15 @@ function ensureProject(database: DatabaseSync, project: string): void {
 
 function rowToConnection(project: string, row: Omit<BufferConnection, 'project'>): BufferConnection { return { project, ...row }; }
 
+function getBufferConnectionInDatabase(database: DatabaseSync, project = defaultProject): BufferConnection | null {
+  const row = database.prepare('select organization_id, credential_ref, cli_version, schema_fingerprint, connection_fingerprint, health_state, channel_synced_at, updated_at from buffer_connections where project_id = ?').get(project) as Omit<BufferConnection, 'project'> | undefined;
+  return row ? rowToConnection(project, row) : null;
+}
+
 export function getBufferConnection(project = defaultProject): BufferConnection | null {
   const database = lineageDb();
   try {
-    const row = database.prepare('select organization_id, credential_ref, cli_version, schema_fingerprint, connection_fingerprint, health_state, channel_synced_at, updated_at from buffer_connections where project_id = ?').get(project) as Omit<BufferConnection, 'project'> | undefined;
-    return row ? rowToConnection(project, row) : null;
+    return getBufferConnectionInDatabase(database, project);
   } finally { database.close(); }
 }
 
@@ -69,7 +85,7 @@ export function connectBuffer(project = defaultProject, fields: { organizationId
   resolveBufferCredential(credentialRef, {});
   assertBufferRuntimeEvidence(runtime.verify());
   const timestamp = nowIso();
-  const fingerprint = bufferConnectionFingerprint(organizationId);
+  const fingerprint = bufferConnectionFingerprint(organizationId, credentialRef);
   const health = resolveBufferCredential(credentialRef, env) ? 'connected' : 'credential_missing';
   const database = lineageDb();
   try {

@@ -96,4 +96,24 @@ describe('asset Social-mark schema', () => {
       expect(preserved.prepare('select id, copy, network_metadata_json from social_variant_revisions').get()).toEqual({ id: 'revision-old', copy: 'Historical copy', network_metadata_json: '{}' });
     } finally { preserved.close(); rmSync(scratch, { recursive: true, force: true }); }
   });
+
+
+  it('creates only append-only Social handoff and provider-insight evidence tables', () => {
+    const scratch = join(repoRoot, '.asset-scratch', 'vitest-social-evidence-schema');
+    rmSync(scratch, { recursive: true, force: true });
+    mkdirSync(scratch, { recursive: true });
+    useLineageTestProfile(join(scratch, 'lineage.sqlite'));
+    const database = lineageDb();
+    try {
+      for (const table of ['social_provider_post_links', 'social_provider_post_snapshots', 'social_media_renditions']) {
+        expect(database.prepare("select name from sqlite_master where type='table' and name=?").get(table)).toEqual({ name: table });
+        expect(database.prepare("select count(*) count from sqlite_master where type='trigger' and tbl_name=? and name like 'append_only_%'").get(table)).toEqual({ count: 2 });
+      }
+      const retired = database.prepare("select name from sqlite_master where type='table' and (name like 'social_delivery_%' or name='social_media_events') order by name").all();
+      expect(retired).toEqual([]);
+      const insightColumns = database.prepare('pragma table_info(social_provider_post_snapshots)').all() as Array<{ name: string }>;
+      expect(insightColumns.map(column => column.name)).toEqual(['id', 'project_id', 'link_id', 'provider_post_id', 'status', 'external_link', 'due_at', 'sent_at', 'metrics_json', 'metrics_updated_at', 'snapshot_sha256', 'observed_at']);
+      expect(insightColumns.map(column => column.name)).not.toEqual(expect.arrayContaining(['credential_ref', 'api_key', 'provider_payload']));
+    } finally { database.close(); rmSync(scratch, { recursive: true, force: true }); }
+  });
 });

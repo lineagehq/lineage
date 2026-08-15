@@ -1,20 +1,22 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import sharp from 'sharp';
 import { defaultProject, repoRoot, setLineageAssetRoot } from '../server/assetCore';
 import { indexLineageAssets, markLineageRerollRequest, updateSelectedAsset } from '../server/assetLineage';
 import { createLineageWorkspace, lineageWorkspaceId } from '../server/assetLineageWorkspaces';
 import { fileSha256 } from '../server/localReview';
+import { BUFFER_CAPABILITY_REGISTRY_VERSION, canonicalBufferCapabilityJson } from '../server/adapters/buffer/bufferCapabilities';
+import { canonicalSocialRevisionDigest } from '../server/social/socialRevisionDigest';
 import { resolveLineageProfile } from '../server/lineageProfiles';
-import { acquireProfileWriterLease, type ProfileWriterLease } from '../server/profileWriterLease';
+import { acquireProfileWriterLease, inspectProfileWriterLease, ProfileWriterLeaseConflictError, type ProfileWriterLease } from '../server/profileWriterLease';
 import { getLineageCodeIdentity } from '../server/runtimeInfo';
 import type { ResolvedLineageProfile } from '../shared/lineageProfileTypes';
 import type { LineageRuntimeInfo } from '../shared/runtimeInfoTypes';
 import { parseRegistryPackageMetadata } from './lineage-channel';
-import { formatAgentGraphDigest, formatLineageHelp, lineageCliCanDelegateMutation, lineageCliRequiresWriterLease, lineageServiceIdentityErrors, printDataResult, resolveStartOptions, runLineageAgentCommand, runLineageDataCommand, runLineageDbCommand, runLineageRuntimeCommand } from './lineageCli';
+import { formatAgentGraphDigest, formatLineageHelp, lineageCliCanDelegateMutation, lineageCliRequiresWriterLease, lineageCliServiceLeaseConflictMessage, lineageServiceIdentityErrors, printDataResult, resolveStartOptions, runLineageAgentCommand, runLineageDataCommand, runLineageDbCommand, runLineageRuntimeCommand } from './lineageCli';
 
 const originalEnv = { ...process.env };
 const cliPackageAssetRoot = repoRoot;
@@ -32,7 +34,18 @@ afterEach(() => {
   setLineageAssetRoot(cliPackageAssetRoot);
 });
 
-function seedCliDb(assetRoot = cliPackageAssetRoot) {
+describe('Gate 5 Social delivery CLI boundary', () => {
+  it('removes provider-mutation commands from the public CLI contract', () => {
+    seedCliDb();
+    for (const operation of ['schedule', 'status', 'reconcile', 'adopt', 'lifecycle-preview', 'lifecycle-confirm']) {
+      expect(() => runLineageDataCommand('social', ['delivery', operation, '--project', defaultProject, '--variant', 'variant-1', '--expected-revision', '1'])).toThrow(`Unknown social delivery command: ${operation}`);
+      expect(lineageCliRequiresWriterLease('social', ['delivery', operation])).toBe(false);
+      expect(lineageCliCanDelegateMutation('social', ['delivery', operation])).toBe(false);
+    }
+  });
+});
+
+function seedCliDb(assetRoot = cliPackageAssetRoot, profileId = 'cli-test-development') {
   cliTestLease?.release();
   cliTestLease = undefined;
   rmSync(cliScratchDir, { force: true, recursive: true });
@@ -44,7 +57,7 @@ function seedCliDb(assetRoot = cliPackageAssetRoot) {
     expected_runtime: { channel: 'dev', code_fingerprint: cliCodeIdentity.fingerprint, code_origin: 'checkout' },
     manifest_path: join(cliScratchDir, 'profile.json'),
     profile_fingerprint: 'e'.repeat(64),
-    profile_id: 'cli-test-development',
+    profile_id: profileId,
     schema_version: 'lineage.profile.v1',
     service_origin: 'http://127.0.0.1:6198',
   };
@@ -68,6 +81,30 @@ function seedCliDb(assetRoot = cliPackageAssetRoot) {
   setLineageAssetRoot(profile.asset_root);
   cliTestLease = acquireProfileWriterLease(profile, 'dev', 'cli');
   indexLineageAssets(defaultProject);
+  return profile;
+}
+
+function seedExactGate4CliFixture(): void {
+  const db = new DatabaseSync(cliDbFile); const now = '2026-08-12T00:00:00.000Z';
+  const project = 'swissifier-demo'; const root = 'local-5748fb8ba6df';
+  const item = '19846893-362c-46be-b5bf-c15e9bcf0b44'; const variant = '58b44a51-58fc-4b2c-b813-8a12a6b6d167';
+  db.prepare('insert or ignore into projects (id, product, display_name, created_at, updated_at) values (?, ?, ?, ?, ?)').run(project, project, 'Swissifier Demo', now, now);
+  db.prepare(`insert into assets (id, project_id, source, local_path, checksum_sha256, media_type, title, status, channel, created_at, updated_at, last_seen_at)
+    values (?, ?, 'local', 'old.png', ?, 'image', 'Root', 'ready', 'linkedin', ?, ?, ?)`).run(root, project, '5748fb8ba6dffea448a0eabf2c361d95958a8b54a3ad5d8e0d499381b820b36b', now, now, now);
+  db.prepare(`insert into lineage_workspaces (id, project_id, root_asset_id, title, status, created_by, active_at, created_at, updated_at)
+    values (?, ?, ?, 'Swissifier rich demo', 'active', 'system', ?, ?, ?)`).run(`${project}:lineage-workspace:${root}`, project, root, now, now, now);
+  db.prepare(`insert into buffer_connections (project_id, organization_id, credential_ref, cli_version, schema_fingerprint, connection_fingerprint, health_state, channel_synced_at, created_at, updated_at)
+    values (?, 'fixture-org', 'env:FIXTURE_ONLY', 'fixture-only', 'fixture-schema', 'fixture-connection-r2', 'connected', ?, ?, ?)`).run(project, now, now, now);
+  db.prepare(`insert into buffer_channels (project_id, channel_id, organization_id, service, service_id, display_name, posting_schedule_json, allowed_actions_json, capability_json, disconnected, locked, paused, available, capability_registry_version, provider_fingerprint, synced_at, stale_at)
+    values (?, 'fixture-linkedin-r2', 'fixture-org', 'linkedin', 'fixture-linkedin-service', 'Synthetic LinkedIn QA', '{}', '[]', '{}', 0, 0, 0, 1, 1, 'fixture-channel-fingerprint-r2', ?, null)`).run(project, now);
+  db.prepare(`insert into social_work_items (id, project_id, root_asset_id, source_asset_id, source_checksum_sha256, campaign_key, editorial_state, created_by, created_at, updated_at)
+    values (?, ?, ?, ?, ?, 'release-2-gate2-qa', 'active', 'system', ?, ?)`).run(item, project, root, root, '5748fb8ba6dffea448a0eabf2c361d95958a8b54a3ad5d8e0d499381b820b36b', now, now);
+  db.prepare(`insert into social_variants (id, item_id, project_id, channel_id, editorial_state, active, current_revision, created_at, updated_at)
+    values (?, ?, ?, 'fixture-linkedin-r2', 'ready', 1, 2, ?, ?)`).run(variant, item, project, now, now);
+  const revisionHash = canonicalSocialRevisionDigest({ channelId: 'fixture-linkedin-r2', copy: 'Synthetic fixture caption', hashtags: [], hashtagPlacement: 'caption', altText: 'Synthetic abstract gradient', altTextReviewed: true, altTextReviewedBy: 'human:qa', editorialState: 'ready', publishMethod: 'automatic', compositionMode: 'addToQueue', channelFingerprint: 'fixture-channel-fingerprint-r2' });
+  db.prepare(`insert into social_variant_revisions (id, variant_id, revision, copy, hashtag_placement, alt_text, alt_text_reviewed, alt_text_reviewed_by, alt_text_reviewed_at, editorial_state, publish_method, composition_mode, channel_fingerprint, revision_hash, created_by, created_at)
+    values ('revision', ?, 2, 'Synthetic fixture caption', 'caption', 'Synthetic abstract gradient', 1, 'human:qa', ?, 'ready', 'automatic', 'addToQueue', 'fixture-channel-fingerprint-r2', ?, 'system', ?)`).run(variant, now, revisionHash, now);
+  db.close();
 }
 
 describe('lineage channel registry metadata', () => {
@@ -1323,15 +1360,68 @@ describe('lineage CLI handoff commands', () => {
     expect(lineageCliCanDelegateMutation('social', ['item', 'show'])).toBe(false);
     expect(lineageCliCanDelegateMutation('social', ['item', 'create'])).toBe(true);
     expect(lineageCliCanDelegateMutation('social', ['variant', 'edit'])).toBe(true);
+    expect(lineageCliRequiresWriterLease('social', ['delivery', 'preview'])).toBe(false);
+    expect(lineageCliRequiresWriterLease('social', ['delivery', 'status'])).toBe(false);
+    expect(lineageCliRequiresWriterLease('social', ['delivery', 'schedule'])).toBe(false);
+    expect(lineageCliRequiresWriterLease('social', ['delivery', 'reconcile'])).toBe(false);
+    expect(lineageCliRequiresWriterLease('social', ['delivery', 'adopt'])).toBe(false);
+    expect(lineageCliCanDelegateMutation('social', ['delivery', 'preview'])).toBe(false);
+    expect(lineageCliCanDelegateMutation('social', ['delivery', 'schedule'])).toBe(false);
+    expect(lineageCliCanDelegateMutation('social', ['delivery', 'reconcile'])).toBe(false);
+    expect(lineageCliCanDelegateMutation('social', ['delivery', 'adopt'])).toBe(false);
+    expect(lineageCliRequiresWriterLease('social', ['qa', 'reseed-gate4'])).toBe(true);
+    expect(lineageCliCanDelegateMutation('social', ['qa', 'reseed-gate4'])).toBe(false);
   });
 
-  it('composes Social Work Items and immutable channel variants without exposing scheduling', () => {
+  it('uses a stopped named development profile CLI lease and rejects an active service locally', () => {
+    const profile = seedCliDb();
+    expect(inspectProfileWriterLease(profile)).toMatchObject({ profile_id: profile.profile_id, environment: 'development', role: 'cli' });
+    cliTestLease?.release(); cliTestLease = undefined;
+    const serviceLease = acquireProfileWriterLease(profile, 'dev', 'service');
+    try {
+      expect(inspectProfileWriterLease(profile)).toMatchObject({ profile_id: profile.profile_id, role: 'service' });
+      let conflict: unknown;
+      try { acquireProfileWriterLease(profile, 'dev', 'cli'); } catch (error) { conflict = error; }
+      expect(conflict).toBeInstanceOf(ProfileWriterLeaseConflictError);
+      expect(lineageCliServiceLeaseConflictMessage('social', ['qa', 'reseed-gate4'], profile.profile_id))
+        .toBe(`social qa reseed-gate4 requires the managed service for profile ${profile.profile_id} to be stopped; this command cannot be delegated`);
+      expect(lineageCliCanDelegateMutation('social', ['qa', 'reseed-gate4'])).toBe(false);
+    } finally { serviceLease.release(); }
+  });
+
+  it('runs the actual stopped-profile reseed entry and refuses an active service without a managed request', () => {
+    const profile = seedCliDb(cliScratchDir); seedExactGate4CliFixture();
+    cliTestLease?.release(); cliTestLease = undefined;
+    const args = ['run', '--silent', 'lineage:dev', '--', 'social', 'qa', 'reseed-gate4', '--project', 'swissifier-demo', '--profile', profile.manifest_path, '--confirm-write', '--json'];
+    const env: NodeJS.ProcessEnv = { ...process.env, LINEAGE_PROFILE: profile.manifest_path, LINEAGE_ASSET_ROOT: profile.asset_root, LINEAGE_DB: profile.database_path };
+    delete env[['BUFFER', 'API', 'KEY'].join('_')];
+    delete env[['LINEAGE', 'SCHEDULER', 'TOKEN'].join('_')];
+    delete env.FIXTURE_ONLY;
+    const stopped = spawnSync('npm', args, { cwd: repoRoot, env, encoding: 'utf8' });
+    expect(stopped.status, stopped.stderr).toBe(0);
+    expect(JSON.parse(stopped.stdout)).toMatchObject({ schema_version: 'lineage.social_gate4_qa_reseed.v1', project: 'swissifier-demo', idempotent: false, synthetic_schedule: true });
+    const serviceLease = acquireProfileWriterLease(profile, 'dev', 'service');
+    try {
+      const active = spawnSync('npm', args, { cwd: repoRoot, env, encoding: 'utf8' });
+      expect(active.status).toBe(1);
+      expect(active.stderr).toContain('requires the managed service');
+      expect(active.stderr).toContain('cannot be delegated');
+      expect(active.stderr).not.toMatch(/ECONNREFUSED|managed writer request|fetch failed/i);
+    } finally { serviceLease.release(); }
+  });
+
+  it('composes Social Work Items and immutable channel variants without exposing scheduling', async () => {
     seedCliDb();
     runLineageDataCommand('social', ['mark', '--project', defaultProject, '--root', fixtureRootAssetId, '--asset', fixtureRootAssetId, '--confirm-write', '--json']);
     const database = new DatabaseSync(cliDbFile); const timestamp = '2026-08-12T12:00:00.000Z';
+    const media = join(cliScratchDir, 'synthetic-social-preview.png');
+    await sharp({ create: { width: 1080, height: 1080, channels: 3, background: '#315c88' } }).png().toFile(media);
+    database.prepare('update assets set local_path=?, checksum_sha256=? where project_id=? and id=?').run(relative(repoRoot, media), fileSha256(media), defaultProject, fixtureRootAssetId);
     database.prepare(`insert into buffer_channels (project_id, channel_id, organization_id, service, service_id, display_name, avatar_ref, timezone, posting_schedule_json, allowed_actions_json, capability_json, disconnected, locked, paused, available, capability_registry_version, provider_fingerprint, synced_at, stale_at)
-      values (?, 'cli-channel', 'cli-org', 'instagram', null, 'CLI channel', null, 'America/Phoenix', '{}', '[]', ?, 0, 0, 0, 1, 1, 'cli-fingerprint', ?, null)`)
-      .run(defaultProject, JSON.stringify({ automatic: true, notification: true, scheduling_modes: ['customScheduled', 'addToQueue'], supported: true }), timestamp);
+      values (?, 'cli-channel', 'cli-org', 'instagram', null, 'CLI channel', null, 'America/Phoenix', ?, '[]', ?, 0, 0, 0, 1, ?, 'cli-fingerprint', ?, null)`)
+      .run(defaultProject, JSON.stringify({ slots: ['09:00'] }), canonicalBufferCapabilityJson('instagram'), BUFFER_CAPABILITY_REGISTRY_VERSION, timestamp);
+    database.prepare(`insert into buffer_connections (project_id, organization_id, credential_ref, cli_version, schema_fingerprint, connection_fingerprint, health_state, channel_synced_at, created_at, updated_at)
+      values (?, 'cli-org', 'env:FIXTURE_ONLY', 'fixture', 'fixture-schema', 'cli-connection', 'connected', ?, ?, ?)`).run(defaultProject, timestamp, timestamp, timestamp);
     database.close();
 
     expect(() => runLineageDataCommand('social', ['item', 'create', '--project', defaultProject, '--root', fixtureRootAssetId, '--confirm-write']))
@@ -1381,12 +1471,23 @@ describe('lineage CLI handoff commands', () => {
       'variant', 'edit', '--project', defaultProject, '--variant', variantId, '--expected-revision', '1',
       '--copy', 'CLI caption', '--hashtag', '#One', '--hashtag', 'Two', '--hashtag-placement', 'first_comment',
       '--alt-text', 'Reviewed CLI image', '--alt-text-reviewed', '--alt-text-reviewed-by', 'human:cli',
-      '--publish-method', 'notification', '--composition-mode', 'customScheduled', '--custom-scheduled-at', '2026-08-20T18:00:00-07:00',
+      '--publish-method', 'notification', '--composition-mode', 'customScheduled', '--custom-scheduled-at', '2099-08-20T18:00:00-07:00',
+      '--editorial-state', 'ready',
       '--actor', 'human:cli', '--confirm-write', '--json',
     ]) as { item: { variants: Array<{ current_revision: number; revision: { hashtags: unknown[]; composition_mode?: string } }> } };
     expect(edited.item.variants[0]).toMatchObject({ current_revision: 2, revision: { hashtags: [{ position: 0, value: 'one' }, { position: 1, value: 'two' }], composition_mode: 'customScheduled' } });
     const validation = runLineageDataCommand('social', ['validate', '--project', defaultProject, '--item', created.item.id, '--json']) as { valid: boolean; scheduled: boolean; schema_version: string };
     expect(validation).toEqual(expect.objectContaining({ schema_version: 'lineage.social_validation.v1', valid: true, scheduled: false }));
+    const preview = runLineageDataCommand('social', ['delivery', 'preview', '--project', defaultProject, '--variant', variantId, '--expected-revision', '2', '--json']) as { preview_sha256: string; schema_version: string };
+    expect(preview).toMatchObject({ schema_version: 'lineage.social_delivery_preview.v1', preview_sha256: expect.stringMatching(/^[a-f0-9]{64}$/) });
+    const handoff = runLineageDataCommand('social', ['agent-handoff', 'prepare', '--project', defaultProject, '--variant', variantId, '--expected-revision', '2', '--preview-sha256', preview.preview_sha256, '--json']) as { agent_brief_markdown: string; preview_sha256: string };
+    expect(handoff).toMatchObject({ preview_sha256: preview.preview_sha256, agent_brief_markdown: expect.stringContaining('# Lineage social publishing brief') });
+    for (const operation of ['schedule', 'reconcile', 'adopt', 'lifecycle-preview', 'lifecycle-confirm']) {
+      expect(() => runLineageDataCommand('social', ['delivery', operation, '--project', defaultProject, '--variant', variantId, '--expected-revision', '2'])).toThrow(`Unknown social delivery command: ${operation}`);
+    }
+    const noDelivery = new DatabaseSync(cliDbFile);
+    expect(noDelivery.prepare("select name from sqlite_master where type='table' and name='social_delivery_operations'").get()).toBeUndefined();
+    noDelivery.close();
     expect(() => runLineageDataCommand('social', ['variant', 'remove', '--project', defaultProject, '--variant', variantId, '--confirm-write', '--json'])).toThrow('expectedRevision is required');
     expect(() => runLineageDataCommand('social', ['variant', 'remove', '--project', defaultProject, '--variant', variantId, '--expected-revision', '1', '--confirm-write', '--json'])).toThrow('revision conflict');
     const removed = runLineageDataCommand('social', ['variant', 'remove', '--project', defaultProject, '--variant', variantId, '--expected-revision', '2', '--confirm-write', '--json']) as { item: { variants: Array<{ active: boolean; current_revision: number; revision: { editorial_state: string } }> } };

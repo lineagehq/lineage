@@ -33,6 +33,15 @@ describe('Buffer project connection', () => {
     expect(connection).toMatchObject({ credential_ref: `env:${['BUFFER', 'API', 'KEY'].join('_')}`, health_state: 'credential_missing' });
   });
 
+  it('binds credential reference identity into the one-way connection fingerprint', () => {
+    const organizationId = generated('fingerprint-organization');
+    const first = connectBuffer('project-fingerprint', { organizationId, credentialRef: 'env:BUFFER_REFERENCE_A', confirmWrite: true }, { BUFFER_REFERENCE_A: generated('reference-a-secret') }, verifiedRuntime());
+    const second = connectBuffer('project-fingerprint', { organizationId, credentialRef: 'env:BUFFER_REFERENCE_B', confirmWrite: true }, { BUFFER_REFERENCE_B: generated('reference-b-secret') }, verifiedRuntime());
+    expect(second.connection_fingerprint).not.toBe(first.connection_fingerprint);
+    expect(second.connection_fingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(second.connection_fingerprint).not.toContain(second.credential_ref);
+  });
+
   it('rejects an unverified runtime before any connection write', () => {
     expect(() => connectBuffer('project-unverified', { organizationId: generated('organization'), confirmWrite: true }, {}, verifiedRuntime({ cli_version: 'unexpected' }))).toThrow('runtime fingerprint mismatch');
     expect(getBufferConnection('project-unverified')).toBeNull();

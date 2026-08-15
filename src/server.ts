@@ -24,6 +24,7 @@ import {
 import { getLineageBrief, linkSelectedLineageChild } from './server/assetLineageHandoff';
 import { removeLineageNode } from './server/assetLineageRemove';
 import { registerSocialMarkRoutes } from './server/social/socialRoutes';
+import { isSocialDeliveryError } from './server/social/socialDelivery';
 import { registerAssetDiscussionMarkRoutes } from './server/assetDiscussionMarks';
 import { isLineageTaskError } from './server/assetLineageTasks';
 import { isLineageWorkspaceError, migrateLegacyLineageWorkspaces } from './server/assetLineageWorkspaces';
@@ -570,6 +571,10 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
   }
   if (isLineageTaskError(error)) {
     res.status(error.status).json({ error: error.message });
+    return;
+  }
+  if (isSocialDeliveryError(error)) {
+    res.status(error.status).json({ error: error.code, message: error.message });
     return;
   }
   if (isLineageError(error)) {

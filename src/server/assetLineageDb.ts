@@ -643,6 +643,36 @@ export function lineageDb(): DatabaseSync {
       primary key(revision_id, position),
       unique(revision_id, value)
     );
+    create table if not exists social_provider_post_links (
+      id text primary key,
+      project_id text not null references projects(id),
+      variant_id text not null references social_variants(id) on delete restrict,
+      revision_id text not null references social_variant_revisions(id) on delete restrict,
+      revision integer not null check (revision > 0),
+      preview_sha256 text not null,
+      provider_post_id text not null,
+      channel_id text not null,
+      rendered_text_sha256 text not null,
+      first_comment_sha256 text,
+      created_at text not null,
+      unique(project_id, variant_id, provider_post_id),
+      unique(project_id, provider_post_id)
+    );
+    create table if not exists social_provider_post_snapshots (
+      id text primary key,
+      project_id text not null references projects(id),
+      link_id text not null references social_provider_post_links(id) on delete restrict,
+      provider_post_id text not null,
+      status text not null check (status in ('draft','error','needs_approval','scheduled','sending','sent')),
+      external_link text,
+      due_at text,
+      sent_at text,
+      metrics_json text not null,
+      metrics_updated_at text,
+      snapshot_sha256 text not null,
+      observed_at text not null,
+      unique(project_id, link_id, snapshot_sha256)
+    );
     create table if not exists lineage_tasks (
       id text primary key,
       project_id text not null references projects(id),
@@ -761,8 +791,45 @@ export function lineageDb(): DatabaseSync {
   ensureAgentClaimScopeValues(database);
   ensureGenerationReceiptCheckValues(database);
   ensureSocialVariantRevisionSchema(database);
+  ensureSocialMediaSchema(database);
+  installSocialEvidenceAppendOnlyTriggers(database);
   ensureLifecycleWriteGuards(database);
   return database;
+}
+
+function ensureSocialMediaSchema(database: DatabaseSync): void {
+  database.exec(`
+    create table if not exists social_media_renditions (
+      id text primary key,
+      project_id text not null references projects(id),
+      source_asset_id text not null references assets(id) on delete restrict,
+      source_attempt_id text not null,
+      source_attempt_asset_id text not null references assets(id) on delete restrict,
+      source_checksum_sha256 text not null,
+      content_type text not null check (content_type in ('image/png', 'image/jpeg')),
+      width integer not null check (width > 0),
+      height integer not null check (height > 0),
+      size_bytes integer not null check (size_bytes > 0 and size_bytes <= 5242880),
+      retention_state text not null check (retention_state in ('referenced_indefinite', 'failed_unreferenced_7d', 'publication_observed_30d')),
+      created_at text not null,
+      unique(project_id, id),
+      unique(project_id, source_attempt_id, source_checksum_sha256, content_type, width, height, size_bytes)
+    )
+  `);
+}
+
+export function installSocialEvidenceAppendOnlyTriggers(database: DatabaseSync): void {
+  for (const table of ['social_provider_post_links', 'social_provider_post_snapshots', 'social_media_renditions']) {
+    for (const operation of ['update', 'delete']) {
+      database.exec(`
+        create trigger if not exists ${quoteIdentifier(`append_only_${table}_${operation}`)}
+        before ${operation} on ${quoteIdentifier(table)}
+        begin
+          select raise(abort, 'social_evidence_append_only');
+        end
+      `);
+    }
+  }
 }
 
 function quoteIdentifier(value: string): string {

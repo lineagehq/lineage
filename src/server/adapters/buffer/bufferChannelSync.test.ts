@@ -75,4 +75,27 @@ describe('Buffer channel sync', () => {
     expect(() => syncBufferChannels(project, { confirmWrite: true }, { env: { BUFFER_TEST_KEY: apiKey }, runtime: driftRuntime })).toThrow('connection fingerprint mismatch');
     expect(driftRuntime.listChannels).not.toHaveBeenCalled();
   });
+
+  it('upgrades an exact Release 1 fingerprint only after a successful channel sync', () => {
+    const project = 'legacy-project';
+    const organizationId = generated('legacy-organization');
+    const apiKey = generated('legacy-credential');
+    const channelId = generated('legacy-channel');
+    const connection = connectBuffer(project, { organizationId, credentialRef: 'env:BUFFER_TEST_KEY', confirmWrite: true }, { BUFFER_TEST_KEY: apiKey }, runtime());
+    const legacyFingerprint = createHash('sha256').update(JSON.stringify({ organizationId, cli: BUFFER_CLI_VERSION, schemas: BUFFER_SCHEMA_HASHES })).digest('hex');
+    const database = lineageDb();
+    database.prepare('update buffer_connections set connection_fingerprint=? where project_id=?').run(legacyFingerprint, project);
+    database.close();
+
+    syncBufferChannels(project, { confirmWrite: true }, { env: { BUFFER_TEST_KEY: apiKey }, runtime: runtime({
+      listChannels: () => [{ id: channelId }],
+      getChannel: () => ({ id: channelId, organizationId, service: 'linkedin', displayName: 'Synthetic LinkedIn' }),
+    }) });
+
+    const upgradedDatabase = lineageDb();
+    const upgraded = upgradedDatabase.prepare('select connection_fingerprint from buffer_connections where project_id=?').get(project) as { connection_fingerprint: string };
+    upgradedDatabase.close();
+    expect(upgraded.connection_fingerprint).toBe(connection.connection_fingerprint);
+    expect(upgraded.connection_fingerprint).not.toBe(legacyFingerprint);
+  });
 });

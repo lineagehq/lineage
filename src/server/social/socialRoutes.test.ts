@@ -11,6 +11,7 @@ import { indexLineageAssets } from '../assetLineage';
 import { lineageDb, nowIso } from '../assetLineageDb';
 import { lineageWorkspaceId } from '../assetLineageWorkspaces';
 import { fileSha256 } from '../localReview';
+import { BUFFER_CAPABILITY_REGISTRY_VERSION, canonicalBufferCapabilityJson } from '../adapters/buffer/bufferCapabilities';
 import { registerSocialMarkRoutes } from './socialRoutes';
 
 const scratchDir = join(repoRoot, '.asset-scratch', 'vitest-canonical-social-routes');
@@ -52,6 +53,24 @@ function startServer(): string {
 }
 
 describe('canonical Social-mark HTTP transport', () => {
+  it('does not register any provider-mutation or legacy delivery-lifecycle routes', async () => {
+    const baseUrl = startServer();
+    const paths = [
+      '/api/social/qa/gate5-scenarios',
+      '/api/social/variants/variant-1/schedule',
+      '/api/social/deliveries/operation-1',
+      '/api/social/deliveries/operation-1/reconcile',
+      '/api/social/deliveries/operation-1/adopt',
+      '/api/social/deliveries/operation-1/lifecycle-preview',
+      '/api/social/deliveries/operation-1/lifecycle-confirm',
+      '/api/social/deliveries/operation-1/lease',
+    ];
+    for (const path of paths) {
+      const response = await fetch(`${baseUrl}${path}`, { method: path.endsWith('operation-1') ? 'GET' : 'POST', headers: { 'content-type': 'application/json' }, body: path.endsWith('operation-1') ? undefined : JSON.stringify({ project: defaultProject }) });
+      expect(response.status, path).toBe(404);
+    }
+  });
+
   it('executes list, dry-run, confirmed, claim-token, and schema-versioned contracts', async () => {
     const rootAssetId = seedRoot();
     const baseUrl = startServer();
@@ -127,8 +146,8 @@ describe('canonical Social-mark HTTP transport', () => {
     const database = lineageDb(); const timestamp = nowIso();
     try {
       database.prepare(`insert into buffer_channels (project_id, channel_id, organization_id, service, service_id, display_name, avatar_ref, timezone, posting_schedule_json, allowed_actions_json, capability_json, disconnected, locked, paused, available, capability_registry_version, provider_fingerprint, synced_at, stale_at)
-        values (?, 'channel-http', 'org-http', 'instagram', null, 'HTTP channel', null, null, '{}', '[]', ?, 0, 0, 0, 1, 1, 'http-fingerprint', ?, null)`)
-        .run(defaultProject, JSON.stringify({ automatic: true, notification: true, scheduling_modes: ['customScheduled', 'addToQueue'], supported: true }), timestamp);
+        values (?, 'channel-http', 'org-http', 'instagram', null, 'HTTP channel', null, null, ?, '[]', ?, 0, 0, 0, 1, ?, 'http-fingerprint', ?, null)`)
+        .run(defaultProject, JSON.stringify({ slots: ['09:00'] }), canonicalBufferCapabilityJson('instagram'), BUFFER_CAPABILITY_REGISTRY_VERSION, timestamp);
     } finally { database.close(); }
     const claim = createAgentClaim({ agentName: 'HTTP editor', project: defaultProject, scopeType: 'lineage_workspace', targetId: lineageWorkspaceId(defaultProject, rootAssetId) });
     const unknownQueryCreate = await post('/api/social/items?apiKey=secret', { rootAssetId, sourceAssetId: rootAssetId, confirmWrite: true }, claim.claim_token);

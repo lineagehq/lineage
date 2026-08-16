@@ -3,6 +3,9 @@ import { LineageError } from '../assetLineage';
 import { listAssetSocialMarks, markAssetSocial, unmarkAssetSocial } from './socialMarks';
 import { addSocialVariant, archiveSocialWorkItem, createSocialWorkItem, editSocialVariant, getSocialWorkItem, removeSocialVariant } from './socialWorkItems';
 import { validateSocialWorkItem } from './socialValidation';
+import { previewSocialDelivery } from './socialDelivery';
+import { createSocialAgentHandoff } from './socialAgentHandoff';
+import { getSocialProviderPost, linkSocialProviderPost, syncSocialProviderPost } from './socialInsights';
 
 type ProjectFrom = (input: { body?: Record<string, unknown>; query?: Record<string, unknown> }) => string;
 type AsyncRoute = (handler: (req: express.Request, res: express.Response) => Promise<void> | void) => express.RequestHandler;
@@ -100,7 +103,44 @@ function bodyExpectedVariants(req: express.Request): Array<{ variantId: string; 
 
 const commonMutationFields = ['project', 'product', 'actor', 'claimToken', 'confirmWrite'] as const;
 
-export function registerSocialMarkRoutes(app: express.Express, projectFrom: ProjectFrom, asyncRoute: AsyncRoute): void {
+export function registerSocialMarkRoutes(app: express.Express, projectFrom: ProjectFrom, asyncRoute: AsyncRoute, _legacyMutationDeps?: unknown): void {
+  app.post('/api/social/variants/:variantId/delivery-preview', asyncRoute((req, res) => {
+    assertSocialRequest(req, ['project', 'product', 'expectedRevision']);
+    const expectedRevision = bodyPositiveInteger(req, 'expectedRevision');
+    if (expectedRevision === undefined) throw new LineageError('expectedRevision is required');
+    res.json(previewSocialDelivery(projectFrom({ body: req.body as Record<string, unknown>, query: req.query }), { variantId: req.params.variantId, expectedRevision }));
+  }));
+  app.post('/api/social/variants/:variantId/agent-handoff', asyncRoute((req, res) => {
+    assertSocialRequest(req, ['project', 'product', 'expectedRevision', 'previewSha256']);
+    const expectedRevision = bodyPositiveInteger(req, 'expectedRevision');
+    if (expectedRevision === undefined) throw new LineageError('expectedRevision is required');
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(createSocialAgentHandoff(projectFrom({ body: req.body as Record<string, unknown>, query: req.query }), {
+      expectedRevision,
+      previewSha256: bodyString(req, 'previewSha256') || '',
+      variantId: req.params.variantId,
+    }));
+  }));
+  app.get('/api/social/variants/:variantId/provider-post', asyncRoute((req, res) => {
+    assertSocialRequest(req, []);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ ok: true, insights: getSocialProviderPost(projectFrom({ query: req.query }), req.params.variantId) });
+  }));
+  app.post('/api/social/variants/:variantId/provider-post', asyncRoute((req, res) => {
+    assertSocialRequest(req, ['project', 'product', 'expectedRevision', 'previewSha256', 'providerPostId', 'claimToken', 'confirmWrite']);
+    const expectedRevision = bodyPositiveInteger(req, 'expectedRevision');
+    if (expectedRevision === undefined) throw new LineageError('expectedRevision is required');
+    res.json(linkSocialProviderPost(projectFrom({ body: req.body as Record<string, unknown>, query: req.query }), {
+      variantId: req.params.variantId, expectedRevision, previewSha256: bodyString(req, 'previewSha256') || '',
+      providerPostId: bodyString(req, 'providerPostId') || '', claimToken: requestClaimToken(req), confirmWrite: bodyBoolean(req, 'confirmWrite'),
+    }));
+  }));
+  app.post('/api/social/variants/:variantId/provider-post/sync', asyncRoute((req, res) => {
+    assertSocialRequest(req, ['project', 'product', 'claimToken', 'confirmWrite']);
+    res.json(syncSocialProviderPost(projectFrom({ body: req.body as Record<string, unknown>, query: req.query }), req.params.variantId, {
+      claimToken: requestClaimToken(req), confirmWrite: bodyBoolean(req, 'confirmWrite'),
+    }));
+  }));
   app.post('/api/social/items', asyncRoute((req, res) => {
     assertSocialRequest(req, [...commonMutationFields, 'campaignKey', 'contentPostId', 'rootAssetId', 'sourceAssetId']);
     res.json(createSocialWorkItem(projectFrom({ body: req.body as Record<string, unknown>, query: req.query }), {

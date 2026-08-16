@@ -121,3 +121,98 @@ export interface SocialValidationResponse {
   scheduled: false;
   issues: SocialValidationIssue[];
 }
+
+export interface SocialDeliveryPreview {
+  schema_version: 'lineage.social_delivery_preview.v1';
+  preview_sha256: string;
+  project: string;
+  item_id: string;
+  workspace_channel?: string;
+  variant_id: string;
+  revision_id: string;
+  revision: number;
+  revision_sha256: string;
+  root_asset_id: string;
+  source_asset_id: string;
+  source_attempt_id: string;
+  source_checksum_sha256: string;
+  source_attempt_asset_id: string;
+  rendition_sha256: string;
+  media_content_type: 'image/png' | 'image/jpeg';
+  media_width: number;
+  media_height: number;
+  media_size_bytes: number;
+  capability_registry_version: number;
+  service: 'instagram' | 'linkedin';
+  channel_id: string;
+  channel_fingerprint: string;
+  capability_fingerprint: string;
+  connection_fingerprint: string;
+  publish_method: SocialPublishMethod;
+  composition_mode: SocialCompositionMode;
+  custom_scheduled_at?: string;
+}
+
+export interface SocialAgentHandoff {
+  schema_version: 'lineage.social_agent_handoff.v1';
+  handoff_id: string;
+  preview_sha256: string;
+  project: string;
+  variant_id: string;
+  revision_id: string;
+  revision: number;
+  buffer_url: string;
+  channel: {
+    id: string;
+    display_name: string;
+    service: 'instagram' | 'linkedin';
+  };
+  caption: string;
+  hashtags: string[];
+  hashtag_placement: SocialHashtagPlacement;
+  rendered_text: string;
+  first_comment?: string;
+  alt_text: string;
+  publish_method: SocialPublishMethod;
+  composition_mode: SocialCompositionMode;
+  custom_scheduled_at?: string;
+  media: {
+    local_file_path: string;
+    local_reference: string;
+    content_type: 'image/png' | 'image/jpeg';
+    checksum_sha256: string;
+    rendition_sha256: string;
+    width: number;
+    height: number;
+    size_bytes: number;
+  };
+  confirmation_policy: 'explicit_operator_confirmation_in_buffer';
+  agent_brief_markdown: string;
+}
+
+export interface SocialProviderMetric {
+  type: 'reactions' | 'comments' | 'shares' | 'reposts' | 'reach' | 'impressions' | 'views' | 'clicks' | 'engagementRate' | 'saves' | 'follows' | 'quotes' | 'viewers' | 'totalTimeWatched' | 'likes' | 'replies' | 'favorites' | 'reblogs' | 'retweets' | 'repins' | 'link_clicks' | 'other';
+  name: string;
+  value: number;
+  unit: 'count' | 'percentage';
+}
+
+export interface SocialProviderPostInsights {
+  schema_version: 'lineage.social_provider_post_insights.v1';
+  link_id: string;
+  provider_post_id: string;
+  project: string;
+  variant_id: string;
+  revision: number;
+  preview_sha256: string;
+  channel_id: string;
+  status: 'needs_approval' | 'scheduled' | 'sending' | 'sent' | 'error';
+  external_link?: string;
+  due_at?: string;
+  sent_at?: string;
+  metrics: SocialProviderMetric[];
+  metrics_updated_at?: string;
+  observed_at: string;
+  stale: boolean;
+  idempotent: boolean;
+}

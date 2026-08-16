@@ -4,9 +4,12 @@ import type {
   SocialBufferChannel,
   SocialBufferConnection,
   SocialCompositionMode,
+  SocialAgentHandoff,
+  SocialDeliveryPreview,
   SocialEditorialState,
   SocialHashtagPlacement,
   SocialPublishMethod,
+  SocialProviderPostInsights,
   SocialValidationResponse,
   SocialVariant,
   SocialWorkItem,
@@ -70,13 +73,20 @@ export function LineageSocialPanel({ isTransitionLocked, node, onClose, onDirtyC
   const [busyCount, setBusyCount] = useState(0);
   const [error, setError] = useState('');
   const [interactionLockGeneration, setInteractionLockGeneration] = useState(0);
+  const [deliveryPreview, setDeliveryPreview] = useState<{ identity: string; value: SocialDeliveryPreview } | null>(null);
+  const [deliveryNotice, setDeliveryNotice] = useState('');
+  const [deliveryBusy, setDeliveryBusy] = useState(false);
+  const [agentHandoff, setAgentHandoff] = useState<SocialAgentHandoff | null>(null);
+  const [providerPostId, setProviderPostId] = useState('');
+  const [providerInsights, setProviderInsights] = useState<SocialProviderPostInsights | null>(null);
   const draftRef = useRef<Draft | null>(null);
   const itemRef = useRef<SocialWorkItem | null>(null);
   const selectedVariantIdRef = useRef<string | null>(null);
   const campaignKeyRef = useRef(campaignKey);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const transitionLockedRef = useRef(false);
-  const requestGeneration = useRef({ catalog: 0, item: 0, save: 0, validation: 0 });
+  const requestGeneration = useRef({ catalog: 0, delivery: 0, item: 0, provider: 0, save: 0, validation: 0 });
+  const deliveryInFlight = useRef(false);
   const identityGeneration = useRef(0);
   const saving = busyCount > 0;
   const beginBusy = () => setBusyCount(current => current + 1);
@@ -85,6 +95,15 @@ export function LineageSocialPanel({ isTransitionLocked, node, onClose, onDirtyC
   const activeVariants = useMemo(() => item?.variants.filter(variant => variant.active) || [], [item]);
   const selectedVariant = activeVariants.find(variant => variant.id === selectedVariantId) || null;
   const dirty = Boolean(draft && JSON.stringify(draft) !== baseline);
+  const deliveryIdentity = JSON.stringify({
+    project, rootAssetId, source: node.asset_id, checksum: node.checksum_sha256 || null,
+    variant: selectedVariant?.id || null, revision: selectedVariant?.current_revision || null,
+    revisionHash: selectedVariant?.revision.revision_hash || null, draft, baseline, catalogReady, connection, channels,
+  });
+  const previewCurrent = Boolean(deliveryPreview && deliveryPreview.identity === deliveryIdentity);
+  const providerIdentity = `${project}:${selectedVariant?.id || ''}:${selectedVariant?.current_revision || ''}`;
+  const providerIdentityRef = useRef(providerIdentity);
+  providerIdentityRef.current = providerIdentity;
   draftRef.current = draft;
   itemRef.current = item;
   selectedVariantIdRef.current = selectedVariantId;
@@ -93,6 +112,8 @@ export function LineageSocialPanel({ isTransitionLocked, node, onClose, onDirtyC
     requestGeneration.current.catalog += 1;
     requestGeneration.current.item += 1;
     requestGeneration.current.save += 1;
+    requestGeneration.current.delivery += 1;
+    requestGeneration.current.provider += 1;
     requestGeneration.current.validation += 1;
   }
   transitionLockedRef.current = transitionLocked;
@@ -104,7 +125,12 @@ export function LineageSocialPanel({ isTransitionLocked, node, onClose, onDirtyC
     if (transitionLocked) panel.setAttribute('inert', '');
     else panel.removeAttribute('inert');
   }, [transitionLocked]);
-  useEffect(() => { if (transitionLocked) setLoading(false); }, [transitionLocked]);
+  useEffect(() => {
+    if (!transitionLocked) return;
+    setLoading(false);
+    setDeliveryBusy(false);
+    deliveryInFlight.current = false;
+  }, [transitionLocked]);
   useEffect(() => {
     if (!transitionLocked && !isTransitionLocked?.()) setInteractionLockGeneration(0);
   }, [isTransitionLocked, transitionLocked]);
@@ -141,13 +167,17 @@ export function LineageSocialPanel({ isTransitionLocked, node, onClose, onDirtyC
     finally { if (generation === requestGeneration.current.catalog) setLoading(false); }
   }
   useEffect(() => { void loadCatalog(); }, [project]);
-
   function selectVariant(variant: SocialVariant) {
     if (!acceptEventTimeOwnership()) return;
     if (dirty && !window.confirm('Discard unsaved Social changes?')) return;
     requestGeneration.current.validation += 1;
+    requestGeneration.current.delivery += 1;
+    requestGeneration.current.provider += 1;
     identityGeneration.current += 1;
     const next = draftFrom(variant);
+    deliveryInFlight.current = false;
+    setDeliveryBusy(false); setDeliveryPreview(null); setAgentHandoff(null); setDeliveryNotice('');
+    setProviderPostId(''); setProviderInsights(null);
     setSelectedVariantId(variant.id); setDraft(next); setBaseline(JSON.stringify(next)); setError(''); setConflictRevision(null); setValidation(null);
   }
 
@@ -158,6 +188,14 @@ export function LineageSocialPanel({ isTransitionLocked, node, onClose, onDirtyC
     setValidation(null); setConflictRevision(null);
     const variant = next.variants.find(candidate => candidate.id === selectedVariantId && candidate.active)
       || next.variants.find(candidate => candidate.active) || null;
+    const nextProviderIdentity = `${project}:${variant?.id || ''}:${variant?.current_revision || ''}`;
+    if (nextProviderIdentity !== providerIdentityRef.current) {
+      requestGeneration.current.delivery += 1;
+      requestGeneration.current.provider += 1;
+      deliveryInFlight.current = false;
+      setDeliveryBusy(false); setDeliveryPreview(null); setAgentHandoff(null); setDeliveryNotice('');
+      setProviderPostId(''); setProviderInsights(null);
+    }
     if (variant) {
       const nextDraft = draftFrom(variant);
       setSelectedVariantId(variant.id); setDraft(nextDraft); setBaseline(JSON.stringify(nextDraft));
@@ -303,6 +341,115 @@ export function LineageSocialPanel({ isTransitionLocked, node, onClose, onDirtyC
     finally { endBusy(); }
   }
 
+  function deliveryError(error: unknown): string {
+    const payload = error instanceof ApiError && error.payload && typeof error.payload === 'object' ? error.payload as Record<string, unknown> : {};
+    const code = String(payload.code || payload.error || '');
+    const message = error instanceof Error ? error.message : String(error);
+    if (code.includes('preview_stale') || /preview changed/i.test(message)) return 'Preview stale. Nothing was sent; create a new preview.';
+    if (/claim|ownership|matching token/i.test(`${code} ${message}`)) return 'Claim conflict. Nothing was sent; refresh ownership and preview again.';
+    return message;
+  }
+
+  async function previewDelivery() {
+    if (!acceptEventTimeOwnership() || !selectedVariant || dirty || selectedBlocked) return;
+    const generation = ++requestGeneration.current.delivery;
+    const identity = deliveryIdentity;
+    setDeliveryBusy(true); setDeliveryNotice(''); setAgentHandoff(null);
+    try {
+      const value = await api<SocialDeliveryPreview>(`/api/social/variants/${selectedVariant.id}/delivery-preview`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ project, expectedRevision: selectedVariant.current_revision }),
+      });
+      if (generation !== requestGeneration.current.delivery || identity !== deliveryIdentity) return;
+      setDeliveryPreview({ identity, value });
+      setDeliveryNotice('Immutable preview ready. Review the exact pins before preparing the agent brief.');
+    } catch (nextError) {
+      if (generation === requestGeneration.current.delivery) setDeliveryNotice(deliveryError(nextError));
+    } finally { if (generation === requestGeneration.current.delivery) setDeliveryBusy(false); }
+  }
+
+  async function prepareAgentBrief() {
+    if (!acceptEventTimeOwnership() || !selectedVariant || !deliveryPreview || !previewCurrent || deliveryInFlight.current) return;
+    deliveryInFlight.current = true;
+    const generation = ++requestGeneration.current.delivery;
+    const identity = deliveryIdentity;
+    setDeliveryBusy(true); setDeliveryNotice('Preparing an immutable agent brief…');
+    try {
+      const handoff = await api<SocialAgentHandoff>(`/api/social/variants/${selectedVariant.id}/agent-handoff`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ project, expectedRevision: selectedVariant.current_revision, previewSha256: deliveryPreview.value.preview_sha256 }),
+      });
+      if (generation !== requestGeneration.current.delivery || identity !== deliveryIdentity) return;
+      setAgentHandoff(handoff);
+      setDeliveryNotice('Agent brief ready. Nothing was uploaded or scheduled. Copy it into a Codex browser session when you want the agent to operate Buffer.');
+    } catch (nextError) {
+      if (generation === requestGeneration.current.delivery) setDeliveryNotice(deliveryError(nextError));
+    } finally {
+      deliveryInFlight.current = false;
+      if (generation === requestGeneration.current.delivery) setDeliveryBusy(false);
+    }
+  }
+
+  async function copyAgentBrief() {
+    if (!agentHandoff) return;
+    try {
+      await navigator.clipboard.writeText(agentHandoff.agent_brief_markdown);
+      setDeliveryNotice('Agent brief copied. Nothing was uploaded or scheduled.');
+    } catch {
+      setDeliveryNotice('Clipboard access was unavailable. Select and copy the visible agent brief manually.');
+    }
+  }
+
+  async function loadProviderInsights() {
+    if (!selectedVariant || deliveryBusy || deliveryInFlight.current) return;
+    deliveryInFlight.current = true;
+    const generation = ++requestGeneration.current.provider;
+    const identity = providerIdentity;
+    setDeliveryBusy(true);
+    try {
+      const value = await api<{ ok: true; insights: SocialProviderPostInsights | null }>(`/api/social/variants/${selectedVariant.id}/provider-post?${new URLSearchParams({ project })}`);
+      if (generation !== requestGeneration.current.provider || identity !== providerIdentityRef.current) return;
+      setProviderInsights(value.insights);
+      setDeliveryNotice(value.insights ? 'Loaded the latest locally recorded Buffer status and metric snapshot.' : 'No verified Buffer post is linked to this variant yet.');
+    } catch (nextError) { if (generation === requestGeneration.current.provider && identity === providerIdentityRef.current) setDeliveryNotice(deliveryError(nextError)); }
+    finally { if (generation === requestGeneration.current.provider) { deliveryInFlight.current = false; setDeliveryBusy(false); } }
+  }
+
+  async function linkProviderPost() {
+    if (!selectedVariant || !deliveryPreview || !previewCurrent || deliveryBusy || deliveryInFlight.current || !providerPostId.trim()) return;
+    deliveryInFlight.current = true;
+    const generation = ++requestGeneration.current.provider;
+    const identity = providerIdentity;
+    setDeliveryBusy(true);
+    try {
+      const value = await api<SocialProviderPostInsights>(`/api/social/variants/${selectedVariant.id}/provider-post`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+          project, expectedRevision: selectedVariant.current_revision, previewSha256: deliveryPreview.value.preview_sha256,
+          providerPostId: providerPostId.trim(), confirmWrite: true,
+        }),
+      });
+      if (generation !== requestGeneration.current.provider || identity !== providerIdentityRef.current) return;
+      setProviderInsights(value); setDeliveryNotice('Verified and linked the exact Buffer post. No Buffer write occurred.');
+    } catch (nextError) { if (generation === requestGeneration.current.provider && identity === providerIdentityRef.current) setDeliveryNotice(deliveryError(nextError)); }
+    finally { if (generation === requestGeneration.current.provider) { deliveryInFlight.current = false; setDeliveryBusy(false); } }
+  }
+
+  async function syncProviderInsights() {
+    if (!selectedVariant || !providerInsights || deliveryBusy || deliveryInFlight.current) return;
+    deliveryInFlight.current = true;
+    const generation = ++requestGeneration.current.provider;
+    const identity = providerIdentity;
+    setDeliveryBusy(true);
+    try {
+      const value = await api<SocialProviderPostInsights>(`/api/social/variants/${selectedVariant.id}/provider-post/sync`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ project, confirmWrite: true }),
+      });
+      if (generation !== requestGeneration.current.provider || identity !== providerIdentityRef.current) return;
+      setProviderInsights(value); setDeliveryNotice('Read the latest Buffer status and metrics. No Buffer write occurred.');
+    } catch (nextError) { if (generation === requestGeneration.current.provider && identity === providerIdentityRef.current) setDeliveryNotice(deliveryError(nextError)); }
+    finally { if (generation === requestGeneration.current.provider) { deliveryInFlight.current = false; setDeliveryBusy(false); } }
+  }
+
   function requestClose() {
     if (!acceptEventTimeOwnership()) return;
     onClose();
@@ -344,7 +491,7 @@ export function LineageSocialPanel({ isTransitionLocked, node, onClose, onDirtyC
       {(transitionLocked || interactionLockGeneration > 0) && <p aria-live="assertive" role="status">Social composition is locked while the approved transition completes. Try the action again after it finishes.</p>}
       <div ref={panelRef}>
       <div className="lineage-side-head">
-        <div><h3>Social composition</h3><p className="muted-copy">Prepare channel variants. Nothing here schedules or sends a post.</p></div>
+        <div><h3>Social composition</h3><p className="muted-copy">Prepare channel variants and agent briefs. Nothing here schedules or sends a post. Lineage never uploads media to Buffer.</p></div>
         <button autoFocus aria-label="Close Social composition" className="icon-button" onClick={requestClose} type="button">×</button>
       </div>
       <dl className="lineage-social-source">
@@ -404,6 +551,44 @@ export function LineageSocialPanel({ isTransitionLocked, node, onClose, onDirtyC
             {conflictRevision !== null && <div className="lineage-social-conflict" role="status"><p>Local draft preserved. Latest server concurrency state: r{conflictRevision}.</p><button aria-describedby={selectedBlocked ? selectedReasonId : undefined} disabled={saving || selectedBlocked} onClick={() => void save(true)} type="button">Retry save against r{conflictRevision}</button></div>}
           </form>}
           <div className="lineage-social-validation"><button aria-describedby={selectedBlocked ? selectedReasonId : undefined} disabled={saving || dirty || selectedBlocked} onClick={() => void runValidation()} type="button">Validate composition</button>{validation && <div aria-live="polite" role="status"><strong>{validation.valid ? 'Composition is valid' : 'Composition needs attention'}</strong>{validation.issues.length > 0 && <ul>{validation.issues.map((issue, index) => <li key={`${issue.code}-${index}`}><code>{issue.field}</code>: {issue.message}</li>)}</ul>}<p>No scheduling or sending has occurred.</p></div>}</div>
+          {selectedVariant && <section aria-label="Prepare Social agent handoff" className="lineage-social-delivery">
+            <h4>Agent handoff</h4>
+            <button disabled={saving || deliveryBusy || dirty || selectedBlocked || selectedVariant.editorial_state !== 'ready'} onClick={() => void previewDelivery()} type="button">Preview agent brief</button>
+            {deliveryPreview && !previewCurrent && <p role="status">Preview invalidated by newer composition, selection, identity, connection, channel, capability, revision, or source evidence. Nothing was sent.</p>}
+            {deliveryPreview && previewCurrent && <div className="lineage-social-preview">
+              <dl>
+                <div><dt>Revision</dt><dd>r{deliveryPreview.value.revision} · <code>{deliveryPreview.value.revision_sha256}</code></dd></div>
+                <div><dt>Buffer channel</dt><dd><code>{deliveryPreview.value.channel_id}</code></dd></div>
+                <div><dt>Method</dt><dd>{deliveryPreview.value.publish_method}</dd></div>
+                <div><dt>Timing</dt><dd>{deliveryPreview.value.composition_mode}{deliveryPreview.value.custom_scheduled_at ? ` · ${deliveryPreview.value.custom_scheduled_at}` : ''}</dd></div>
+                <div><dt>Source</dt><dd><code>{deliveryPreview.value.source_asset_id}</code> · attempt <code>{deliveryPreview.value.source_attempt_id}</code> · <code>{deliveryPreview.value.source_checksum_sha256}</code></dd></div>
+                <div><dt>Capability fingerprint</dt><dd><code>{deliveryPreview.value.capability_fingerprint}</code></dd></div>
+              </dl>
+              <button disabled={deliveryBusy} onClick={() => void prepareAgentBrief()} type="button">Prepare agent brief</button>
+              <p className="muted-copy">The brief gives a Codex browser session the exact media path, checksum, caption, channel, and timing intent. Lineage performs no Buffer write.</p>
+            </div>}
+            {agentHandoff && previewCurrent && <div className="lineage-social-preview">
+              <p>Immutable agent handoff <code>{agentHandoff.handoff_id}</code></p>
+              <label>Agent brief<textarea readOnly rows={16} value={agentHandoff.agent_brief_markdown} /></label>
+              <button onClick={() => void copyAgentBrief()} type="button">Copy agent brief</button>
+              <a href={agentHandoff.buffer_url} rel="noreferrer" target="_blank">Open exact Buffer channel</a>
+            </div>}
+            <section aria-label="Buffer read synchronization" className="lineage-social-preview">
+              <h5>Buffer status and metrics</h5>
+              <p className="muted-copy">After a browser agent schedules the post, paste the returned Buffer post ID. Lineage verifies the exact channel and text before linking it. These actions only read Buffer.</p>
+              <label>Buffer post ID<input onChange={event => setProviderPostId(event.target.value)} value={providerPostId} /></label>
+              <button disabled={deliveryBusy || !deliveryPreview || !previewCurrent || !providerPostId.trim()} onClick={() => void linkProviderPost()} type="button">Verify and link Buffer post</button>
+              <button disabled={deliveryBusy} onClick={() => void loadProviderInsights()} type="button">Load linked Buffer status</button>
+              {providerInsights && <div>
+                <p>{providerInsights.status} · post <code>{providerInsights.provider_post_id}</code>{providerInsights.stale ? ' · metrics stale or not yet available' : ''}</p>
+                {providerInsights.external_link && <a href={providerInsights.external_link} rel="noreferrer" target="_blank">Open published post</a>}
+                {providerInsights.metrics_updated_at && <p>Metrics updated {new Date(providerInsights.metrics_updated_at).toLocaleString()}</p>}
+                {providerInsights.metrics.length > 0 ? <dl>{providerInsights.metrics.map(metric => <div key={metric.type}><dt>{metric.name}</dt><dd>{metric.value}{metric.unit === 'percentage' ? '%' : ''}</dd></div>)}</dl> : <p>No Buffer metrics are available yet.</p>}
+                <button disabled={deliveryBusy} onClick={() => void syncProviderInsights()} type="button">Sync Buffer status and metrics</button>
+              </div>}
+            </section>
+            {deliveryNotice && <p aria-live="assertive" role="status">{deliveryNotice}</p>}
+          </section>}
         </>
       )}
       </div>

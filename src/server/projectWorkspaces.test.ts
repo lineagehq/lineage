@@ -44,6 +44,31 @@ function insertAsset(project: string, id: string, localPath?: string): void {
   database.close();
 }
 
+function insertSocialEvidence(project: string, assetId: string): void {
+  const database = lineageDb();
+  const timestamp = '2026-07-29T12:00:00.000Z';
+  database.exec(`
+    insert into buffer_connections (project_id, organization_id, credential_ref, cli_version, schema_fingerprint, connection_fingerprint, health_state, channel_synced_at, created_at, updated_at)
+    values ('${project}', 'fixture-org', 'env:FIXTURE_ONLY', 'fixture-cli', 'fixture-schema', 'fixture-connection', 'connected', '${timestamp}', '${timestamp}', '${timestamp}');
+    insert into buffer_channels (project_id, channel_id, organization_id, service, display_name, posting_schedule_json, allowed_actions_json, capability_json, disconnected, locked, paused, available, capability_registry_version, provider_fingerprint, synced_at)
+    values ('${project}', 'fixture-channel', 'fixture-org', 'linkedin', 'Fixture LinkedIn', '{"times":["09:00"]}', '[]', '{}', 0, 0, 0, 1, 2, 'fixture-channel-fingerprint', '${timestamp}');
+    insert into social_work_items (id, project_id, root_asset_id, source_asset_id, source_checksum_sha256, campaign_key, editorial_state, created_by, created_at, updated_at)
+    values ('fixture-social-item', '${project}', '${assetId}', '${assetId}', '${'a'.repeat(64)}', 'fixture-campaign', 'active', 'human:test', '${timestamp}', '${timestamp}');
+    insert into social_variants (id, item_id, project_id, channel_id, editorial_state, active, current_revision, created_at, updated_at)
+    values ('fixture-social-variant', 'fixture-social-item', '${project}', 'fixture-channel', 'ready', 1, 1, '${timestamp}', '${timestamp}');
+    insert into social_variant_revisions (id, variant_id, revision, copy, hashtag_placement, alt_text, alt_text_reviewed, alt_text_reviewed_by, alt_text_reviewed_at, editorial_state, publish_method, composition_mode, custom_scheduled_at, channel_fingerprint, revision_hash, created_by, created_at)
+    values ('fixture-social-revision', 'fixture-social-variant', 1, 'Fixture caption', 'caption', 'Fixture alt text', 1, 'human:test', '${timestamp}', 'ready', 'automatic', 'addToQueue', null, 'fixture-channel-fingerprint', '${'b'.repeat(64)}', 'human:test', '${timestamp}');
+    insert into social_hashtags (revision_id, position, value) values ('fixture-social-revision', 0, 'fixture');
+    insert into social_media_renditions (id, project_id, source_asset_id, source_attempt_id, source_attempt_asset_id, source_checksum_sha256, content_type, width, height, size_bytes, retention_state, created_at)
+    values ('fixture-rendition', '${project}', '${assetId}', 'fixture-source-attempt', '${assetId}', '${'a'.repeat(64)}', 'image/png', 1200, 628, 10, 'referenced_indefinite', '${timestamp}');
+    insert into social_provider_post_links (id, project_id, variant_id, revision_id, revision, preview_sha256, provider_post_id, channel_id, rendered_text_sha256, first_comment_sha256, provider_asset_sha256, created_at)
+    values ('fixture-provider-link', '${project}', 'fixture-social-variant', 'fixture-social-revision', 1, '${'c'.repeat(64)}', 'fixture-provider-post', 'fixture-channel', '${'d'.repeat(64)}', null, '${'f'.repeat(64)}', '${timestamp}');
+    insert into social_provider_post_snapshots (id, project_id, link_id, provider_post_id, status, external_link, due_at, sent_at, metrics_json, metrics_updated_at, snapshot_sha256, observed_at)
+    values ('fixture-provider-snapshot', '${project}', 'fixture-provider-link', 'fixture-provider-post', 'sent', 'https://example.test/post/fixture', '${timestamp}', '${timestamp}', '[]', '${timestamp}', '${'e'.repeat(64)}', '${timestamp}');
+  `);
+  database.close();
+}
+
 beforeEach(() => {
   rmSync(scratchRoot, { force: true, recursive: true });
   mkdirSync(assetRoot, { recursive: true });
@@ -665,7 +690,17 @@ describe('project/workspace organization persistence', () => {
     writeFileSync(physicalPath, 'preserve-project-media');
     insertAsset(project, 'project-delete-asset', `${project}/preserved-source.png`);
     insertAsset(otherProject, 'project-keep-asset');
+    insertSocialEvidence(project, 'project-delete-asset');
+    const retainedEvidence = lineageDb();
+    retainedEvidence.prepare(`insert into social_media_renditions
+      (id, project_id, source_asset_id, source_attempt_id, source_attempt_asset_id, source_checksum_sha256, content_type, width, height, size_bytes, retention_state, created_at)
+      values ('retained-rendition', ?, 'project-keep-asset', 'retained-attempt', 'project-keep-asset', ?, 'image/png', 1200, 628, 10, 'referenced_indefinite', '2026-07-29T12:00:00.000Z')`)
+      .run(otherProject, 'f'.repeat(64));
+    retainedEvidence.close();
     const plan = planProjectDeletion(project);
+    for (const table of ['buffer_connections', 'buffer_channels', 'social_work_items', 'social_variants', 'social_variant_revisions', 'social_hashtags', 'social_media_renditions', 'social_provider_post_links', 'social_provider_post_snapshots']) {
+      expect(plan.counts).toContainEqual({ table, count: 1 });
+    }
     expect(() => deleteProject(project, {
       expectedDigest: plan.digest,
       confirmation: 'wrong',
@@ -677,6 +712,15 @@ describe('project/workspace organization persistence', () => {
     changed.close();
     expect(() => deleteProject(project, {
       expectedDigest: plan.digest,
+      confirmation: 'Project Delete',
+      confirmWrite: true,
+    })).toThrow(/changed/i);
+    const socialPlan = planProjectDeletion(project);
+    const changedSocial = lineageDb();
+    changedSocial.prepare("update buffer_channels set display_name = 'Changed social channel' where project_id = ?").run(project);
+    changedSocial.close();
+    expect(() => deleteProject(project, {
+      expectedDigest: socialPlan.digest,
       confirmation: 'Project Delete',
       confirmWrite: true,
     })).toThrow(/changed/i);
@@ -694,6 +738,14 @@ describe('project/workspace organization persistence', () => {
     const verification = lineageDb();
     expect(verification.prepare('select count(*) count from projects where id = ?').get(project)).toEqual({ count: 0 });
     expect(verification.prepare('select count(*) count from assets where project_id = ?').get(project)).toEqual({ count: 0 });
+    for (const table of ['buffer_connections', 'buffer_channels', 'social_work_items', 'social_variants', 'social_media_renditions', 'social_provider_post_links', 'social_provider_post_snapshots']) {
+      expect(verification.prepare(`select count(*) count from ${table} where project_id = ?`).get(project)).toEqual({ count: 0 });
+    }
+    expect(verification.prepare("select count(*) count from social_variant_revisions where id = 'fixture-social-revision'").get()).toEqual({ count: 0 });
+    expect(verification.prepare("select count(*) count from social_hashtags where revision_id = 'fixture-social-revision'").get()).toEqual({ count: 0 });
+    expect(verification.prepare("select count(*) count from sqlite_master where type='trigger' and name in ('append_only_social_provider_post_links_delete','append_only_social_provider_post_snapshots_delete','append_only_social_media_renditions_delete')").get()).toEqual({ count: 3 });
+    expect(() => verification.prepare("delete from social_media_renditions where id='retained-rendition'").run()).toThrow('social_evidence_append_only');
+    expect(verification.prepare("select count(*) count from social_media_renditions where id='retained-rendition'").get()).toEqual({ count: 1 });
     expect(verification.prepare('select count(*) count from projects where id = ?').get(otherProject)).toEqual({ count: 1 });
     expect(verification.prepare('select finalized_at from project_tombstones where project_key = ?').get(project))
       .toEqual({ finalized_at: expect.any(String) });

@@ -10,7 +10,7 @@ import {
 } from './assetCore';
 import { initProject } from './assetProjects';
 import { projectScopedAssetAlias } from './assetLineage';
-import { lineageDb, nowIso, type DatabaseSync } from './assetLineageDb';
+import { installSocialEvidenceAppendOnlyTriggers, lineageDb, nowIso, type DatabaseSync } from './assetLineageDb';
 import { inferredLegacyLineageWorkspaces } from './assetLineageWorkspaces';
 import type {
   CollectionPagination,
@@ -978,6 +978,13 @@ const projectDirectTables = [
   'generation_target_defaults',
   'node_next_output_target_settings',
   'adapter_settings',
+  'buffer_connections',
+  'buffer_channels',
+  'social_work_items',
+  'social_variants',
+  'social_provider_post_links',
+  'social_provider_post_snapshots',
+  'social_media_renditions',
   'asset_social_marks',
   'asset_discussion_marks',
   'asset_reroll_requests',
@@ -1007,6 +1014,8 @@ function projectImpactCounts(database: DatabaseSync, project: string): DeletionI
     { table: 'generation_output_slots', count: count(database, 'select count(*) count from generation_output_slots where job_id in (select id from generation_jobs where project_id = ?)', project) },
     { table: 'generation_job_target_resolutions', count: count(database, 'select count(*) count from generation_job_target_resolutions where job_id in (select id from generation_jobs where project_id = ?)', project) },
     { table: 'asset_output_specs', count: count(database, 'select count(*) count from asset_output_specs where generation_job_id in (select id from generation_jobs where project_id = ?) or asset_id in (select id from assets where project_id = ?)', project, project) },
+    { table: 'social_variant_revisions', count: count(database, 'select count(*) count from social_variant_revisions where variant_id in (select id from social_variants where project_id = ?)', project) },
+    { table: 'social_hashtags', count: count(database, 'select count(*) count from social_hashtags where revision_id in (select id from social_variant_revisions where variant_id in (select id from social_variants where project_id = ?))', project) },
     { table: 'generation_job_inputs', count: count(database, 'select count(*) count from generation_job_inputs where project_id = ?', project) },
     { table: 'generation_job_outputs', count: count(database, 'select count(*) count from generation_job_outputs where project_id = ?', project) },
     { table: 'projects', count: count(database, 'select count(*) count from projects where id = ?', project) },
@@ -1093,6 +1102,13 @@ function projectStateDigest(database: DatabaseSync, project: string): string {
     'generation_target_defaults',
     'node_next_output_target_settings',
     'adapter_settings',
+    'buffer_connections',
+    'buffer_channels',
+    'social_work_items',
+    'social_variants',
+    'social_provider_post_links',
+    'social_provider_post_snapshots',
+    'social_media_renditions',
     'lineage_tasks',
     'agent_claims',
     'deleted_lineage_workspaces',
@@ -1145,6 +1161,18 @@ function projectStateDigest(database: DatabaseSync, project: string): string {
         or asset_id in (select id from assets where project_id = ?)
       order by rowid
     `).all(project, project),
+    social_variant_revisions: database.prepare(`
+      select rowid, * from social_variant_revisions where variant_id in (
+        select id from social_variants where project_id = ?
+      ) order by rowid
+    `).all(project),
+    social_hashtags: database.prepare(`
+      select rowid, * from social_hashtags where revision_id in (
+        select id from social_variant_revisions where variant_id in (
+          select id from social_variants where project_id = ?
+        )
+      ) order by rowid
+    `).all(project),
     lineage_task_events: database.prepare(`
       select rowid, * from lineage_task_events where task_id in (
         select id from lineage_tasks where project_id = ?
@@ -1185,6 +1213,19 @@ function deleteProjectRows(database: DatabaseSync, project: string): void {
   database.prepare('delete from selection_items where set_id in (select id from selection_sets where project_id = ?)').run(project);
   database.prepare('delete from asset_reviews where asset_id in (select id from assets where project_id = ?)').run(project);
   deleteProjectGenerationChildren(database, project);
+  for (const table of ['social_provider_post_links', 'social_provider_post_snapshots', 'social_media_renditions']) {
+    database.exec(`drop trigger if exists append_only_${table}_delete`);
+  }
+  database.prepare('delete from social_provider_post_snapshots where project_id = ?').run(project);
+  database.prepare('delete from social_provider_post_links where project_id = ?').run(project);
+  database.prepare('delete from social_media_renditions where project_id = ?').run(project);
+  database.prepare('delete from social_hashtags where revision_id in (select id from social_variant_revisions where variant_id in (select id from social_variants where project_id = ?))').run(project);
+  database.prepare('delete from social_variant_revisions where variant_id in (select id from social_variants where project_id = ?)').run(project);
+  database.prepare('delete from social_variants where project_id = ?').run(project);
+  database.prepare('delete from social_work_items where project_id = ?').run(project);
+  database.prepare('delete from buffer_channels where project_id = ?').run(project);
+  database.prepare('delete from buffer_connections where project_id = ?').run(project);
+  installSocialEvidenceAppendOnlyTriggers(database);
   for (const table of [
     'content_targets',
     'content_post_assets',

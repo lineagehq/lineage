@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import type {
   SocialCompositionMode,
   SocialEditorialState,
@@ -12,6 +12,7 @@ import type {
 import { getLineageSnapshot, LineageError } from '../assetLineage';
 import { lineageDb, nowIso, type DatabaseSync } from '../assetLineageDb';
 import { requireLineageWorkspaceClaimForWrite } from '../lineageClaimGuards';
+import { canonicalSocialRevisionDigest } from './socialRevisionDigest';
 
 interface WorkItemRow {
   id: string; project_id: string; root_asset_id: string; source_asset_id: string;
@@ -122,10 +123,14 @@ function readItem(database: DatabaseSync, row: WorkItemRow): SocialWorkItem {
 export function getSocialWorkItem(project: string, itemId: string): SocialWorkItemResponse {
   const database = lineageDb();
   try {
-    const row = database.prepare('select * from social_work_items where project_id = ? and id = ?').get(project, itemId) as WorkItemRow | undefined;
-    if (!row) throw new LineageError(`Social Work Item ${itemId} was not found in project ${project}`, 404);
-    return { schema_version: 'lineage.social_work_item.v1', item: readItem(database, row) };
+    return getSocialWorkItemInDatabase(database, project, itemId);
   } finally { database.close(); }
+}
+
+export function getSocialWorkItemInDatabase(database: DatabaseSync, project: string, itemId: string): SocialWorkItemResponse {
+  const row = database.prepare('select * from social_work_items where project_id = ? and id = ?').get(project, itemId) as WorkItemRow | undefined;
+  if (!row) throw new LineageError(`Social Work Item ${itemId} was not found in project ${project}`, 404);
+  return { schema_version: 'lineage.social_work_item.v1', item: readItem(database, row) };
 }
 
 export function createSocialWorkItem(project: string, fields: CreateSocialWorkItemFields): SocialWorkItemResponse {
@@ -207,10 +212,6 @@ function requireZonedTimestamp(value: string): string {
   return normalized;
 }
 
-function revisionDigest(input: Record<string, unknown>): string {
-  return createHash('sha256').update(JSON.stringify(input)).digest('hex');
-}
-
 function insertRevision(database: DatabaseSync, variant: VariantRow, input: {
   copy: string; hashtags: string[]; hashtagPlacement: SocialHashtagPlacement; altText?: string;
   altTextReviewed: boolean; altTextReviewedBy?: string; altTextReviewedAt?: string; editorialState: SocialEditorialState;
@@ -224,15 +225,20 @@ function insertRevision(database: DatabaseSync, variant: VariantRow, input: {
   if (input.compositionMode !== 'customScheduled' && input.customScheduledAt) throw new LineageError('custom_scheduled_at is valid only with customScheduled composition intent');
   const hashtags = normalizeHashtags(input.hashtags);
   const customScheduledAt = input.customScheduledAt ? requireZonedTimestamp(input.customScheduledAt) : undefined;
-  const digestInput = {
-    alt_text: input.altText?.trim() || null, alt_text_reviewed: input.altTextReviewed,
-    alt_text_reviewed_by: input.altTextReviewed ? input.altTextReviewedBy?.trim() || null : null,
-    channel_fingerprint: input.channelFingerprint, channel_id: variant.channel_id,
-    composition_mode: input.compositionMode || null, copy: input.copy,
-    custom_scheduled_at: customScheduledAt || null, hashtag_placement: input.hashtagPlacement,
-    hashtags, editorial_state: input.editorialState, publish_method: input.publishMethod,
-  };
-  const hash = revisionDigest(digestInput);
+  const hash = canonicalSocialRevisionDigest({
+    channelId: variant.channel_id,
+    copy: input.copy,
+    hashtags: hashtags.map((value, position) => ({ position, value })),
+    hashtagPlacement: input.hashtagPlacement,
+    altText: input.altText,
+    altTextReviewed: input.altTextReviewed,
+    altTextReviewedBy: input.altTextReviewedBy,
+    editorialState: input.editorialState,
+    publishMethod: input.publishMethod,
+    compositionMode: input.compositionMode,
+    customScheduledAt,
+    channelFingerprint: input.channelFingerprint,
+  });
   const current = database.prepare('select revision_hash from social_variant_revisions where variant_id=? and revision=?').get(variant.id, variant.current_revision) as { revision_hash: string } | undefined;
   if (current?.revision_hash === hash) return Number(variant.current_revision);
   const revision = Number(variant.current_revision) + 1;

@@ -24,6 +24,7 @@ import {
   lineageSelectionPacketV2IdentitySha256,
   lineageSelectionPacketV3IdentityProjection,
   lineageSelectionPacketV3IdentitySha256,
+  lineageCurrentAttemptIdentityForNode,
   LineageSelectionPacketError,
 } from './lineageSelectionPacket';
 
@@ -116,6 +117,13 @@ describe('lineage selection packet', () => {
     rmSync(scratchDir, { force: true, recursive: true });
     mkdirSync(scratchDir, { recursive: true });
     useLineageTestProfile(dbFile);
+  });
+
+  it('resolves and checksum-validates a specified node current attempt without requiring Canvas selection', () => {
+    const files = seedSelectedWorkspace();
+    const rootAttempt = lineageCurrentAttemptIdentityForNode(defaultProject, files.rootId, files.rootId);
+    expect(rootAttempt).toMatchObject({ root_asset_id: files.rootId, node_asset_id: files.rootId, checksum_sha256: fileSha256(files.root) });
+    expect(exportV2(files.rootId).selection.asset_ids).not.toContain(files.rootId);
   });
 
   afterEach(() => {
@@ -324,6 +332,13 @@ describe('lineage selection packet', () => {
     const files = seedSelectedWorkspace();
     const initial = exportV2(files.rootId);
     const reroll = seedCurrentReroll(files);
+
+    expect(lineageCurrentAttemptIdentityForNode(defaultProject, files.rootId, files.childId)).toMatchObject({
+      attempt_id: reroll.attempt.id,
+      checksum_sha256: reroll.checksum,
+      local_file_path: reroll.reroll,
+      local_reference: reroll.reroll,
+    });
 
     const promotedReroll = exportV2(files.rootId);
     expect(promotedReroll.identity_sha256).not.toBe(initial.identity_sha256);

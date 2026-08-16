@@ -10,6 +10,7 @@ import { lineageDb, nowIso } from '../assetLineageDb';
 import { lineageWorkspaceId } from '../assetLineageWorkspaces';
 import { fileSha256 } from '../localReview';
 import * as bufferRuntime from '../adapters/buffer/bufferRuntime';
+import { BUFFER_CAPABILITY_REGISTRY_VERSION, canonicalBufferCapabilityJson } from '../adapters/buffer/bufferCapabilities';
 import { markAssetSocial } from './socialMarks';
 import { addSocialVariant, archiveSocialWorkItem, createSocialWorkItem, editSocialVariant, getSocialWorkItem, removeSocialVariant } from './socialWorkItems';
 import { validateSocialWorkItem } from './socialValidation';
@@ -21,8 +22,8 @@ function seedChannel(channelId = 'channel-instagram', fingerprint = 'fingerprint
   const database = lineageDb(); const timestamp = nowIso();
   try {
     database.prepare(`insert into buffer_channels (project_id, channel_id, organization_id, service, service_id, display_name, avatar_ref, timezone, posting_schedule_json, allowed_actions_json, capability_json, disconnected, locked, paused, available, capability_registry_version, provider_fingerprint, synced_at, stale_at)
-      values (?, ?, 'org-safe', 'instagram', null, 'Instagram safe', null, 'America/Phoenix', '{}', '[]', ?, 0, 0, 0, 1, 1, ?, ?, null)`)
-      .run(defaultProject, channelId, JSON.stringify({ automatic: true, image_post: true, notification: true, scheduling_modes: ['customScheduled', 'addToQueue'], supported: true, reason: null }), fingerprint, timestamp);
+      values (?, ?, 'org-safe', 'instagram', null, 'Instagram safe', null, 'America/Phoenix', ?, '[]', ?, 0, 0, 0, 1, ?, ?, ?, null)`)
+      .run(defaultProject, channelId, JSON.stringify({ slots: ['09:00'] }), canonicalBufferCapabilityJson('instagram'), BUFFER_CAPABILITY_REGISTRY_VERSION, fingerprint, timestamp);
   } finally { database.close(); }
 }
 
@@ -172,8 +173,11 @@ describe('Social Work Item composition aggregate', () => {
     expect(validateSocialWorkItem(defaultProject, item.id)).toMatchObject({ valid: false, issues: [expect.objectContaining({ field: 'variants', code: 'variant_required' })] });
     const variant = addSocialVariant(defaultProject, { itemId: item.id, channelId: 'channel-instagram', confirmWrite: true, claimToken: token }).item.variants[0];
     let validation = validateSocialWorkItem(defaultProject, item.id);
-    expect(validation).toMatchObject({ schema_version: 'lineage.social_validation.v1', valid: false, scheduled: false, issues: [expect.objectContaining({ field: 'copy', variant_id: variant.id })] });
-    editSocialVariant(defaultProject, { variantId: variant.id, expectedRevision: 1, copy: 'Ready caption', compositionMode: 'addToQueue', confirmWrite: true, claimToken: token });
+    expect(validation).toMatchObject({ schema_version: 'lineage.social_validation.v1', valid: false, scheduled: false, issues: [
+      expect.objectContaining({ field: 'copy', variant_id: variant.id }),
+      expect.objectContaining({ field: 'alt_text', code: 'alt_text_review_required', variant_id: variant.id }),
+    ] });
+    editSocialVariant(defaultProject, { variantId: variant.id, expectedRevision: 1, copy: 'Ready caption', altText: 'Reviewed synthetic image', altTextReviewed: true, altTextReviewedBy: 'human:test', compositionMode: 'addToQueue', confirmWrite: true, claimToken: token });
     validation = validateSocialWorkItem(defaultProject, item.id);
     expect(validation).toMatchObject({ valid: true, scheduled: false, issues: [] });
     const database = lineageDb();

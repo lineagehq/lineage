@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { defaultProject, packageRoot } from '../../assetCore';
 import { lineageDb, nowIso } from '../../assetLineageDb';
 import { BUFFER_CAPABILITY_REGISTRY_VERSION, bufferChannelCapability } from './bufferCapabilities';
-import { assertBufferConnectionFingerprint, BufferConnectionError, getBufferConnection, resolveBufferCredential } from './bufferConnection';
+import { assertBufferConnectionFingerprint, BufferConnectionError, currentBufferConnectionFingerprint, getBufferConnection, resolveBufferCredential } from './bufferConnection';
 import { createBufferReadRuntime, type BufferReadRuntime } from './bufferRuntime';
 
 type ProviderChannel = Record<string, unknown>;
@@ -68,7 +68,7 @@ export function syncBufferChannels(project = defaultProject, fields: { confirmWr
   const apiKey = resolveBufferCredential(connection.credential_ref, deps.env);
   if (!apiKey) throw new BufferConnectionError('Buffer credential is unavailable', 409);
   const runtime = deps.runtime || createBufferReadRuntime(join(packageRoot, '.lineage', 'buffer-config'));
-  assertBufferConnectionFingerprint(connection, runtime.verify());
+  const fingerprintState = assertBufferConnectionFingerprint(connection, runtime.verify());
   const summaries = listPayload(runtime.listChannels(connection.organization_id, apiKey));
   const details = summaries.map(summary => channelPayload(runtime.getChannel(text(summary.id), apiKey)));
   if (details.some(channel => text(channel.organizationId) !== connection.organization_id)) throw new BufferConnectionError('Buffer organization mismatch', 409);
@@ -85,6 +85,10 @@ export function syncBufferChannels(project = defaultProject, fields: { confirmWr
         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null)
         on conflict(project_id, channel_id) do update set organization_id=excluded.organization_id, service=excluded.service, service_id=excluded.service_id, display_name=excluded.display_name, avatar_ref=excluded.avatar_ref, timezone=excluded.timezone, posting_schedule_json=excluded.posting_schedule_json, allowed_actions_json=excluded.allowed_actions_json, capability_json=excluded.capability_json, disconnected=excluded.disconnected, locked=excluded.locked, paused=excluded.paused, available=excluded.available, capability_registry_version=excluded.capability_registry_version, provider_fingerprint=excluded.provider_fingerprint, synced_at=excluded.synced_at, stale_at=null`)
         .run(project, text(channel.id), connection.organization_id, text(channel.service), text(channel.serviceId) || null, text(channel.displayName) || text(channel.name), text(channel.avatar) || null, text(channel.timezone) || null, safeJson(channel.postingSchedule), safeJson(channel.allowedActions), safeJson(capability), disconnected ? 1 : 0, locked ? 1 : 0, paused ? 1 : 0, disconnected || locked ? 0 : 1, BUFFER_CAPABILITY_REGISTRY_VERSION, providerFingerprint, timestamp);
+    }
+    if (fingerprintState === 'legacy') {
+      writeDb.prepare('update buffer_connections set connection_fingerprint=? where project_id=? and connection_fingerprint=?')
+        .run(currentBufferConnectionFingerprint(connection), project, connection.connection_fingerprint);
     }
     writeDb.prepare('update buffer_connections set channel_synced_at=?, health_state=\'connected\', updated_at=? where project_id=?').run(timestamp, timestamp, project);
     writeDb.exec('commit');

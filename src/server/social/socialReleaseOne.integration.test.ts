@@ -1,4 +1,6 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useLineageTestProfile } from '../../test/lineageTestProfile';
@@ -9,6 +11,7 @@ import { indexLineageAssets } from '../assetLineage';
 import { lineageDb, nowIso } from '../assetLineageDb';
 import { lineageWorkspaceId } from '../assetLineageWorkspaces';
 import * as bufferRuntime from '../adapters/buffer/bufferRuntime';
+import { BUFFER_CAPABILITY_REGISTRY_VERSION, bufferChannelCapability } from '../adapters/buffer/bufferCapabilities';
 import * as bufferPostingAdapter from '../adapters/posting/bufferPostingAdapter';
 import * as bufferPostingService from '../adapters/posting/bufferPostingService';
 import { fileSha256 } from '../localReview';
@@ -17,6 +20,11 @@ import { addSocialVariant, createSocialWorkItem, editSocialVariant, getSocialWor
 import { validateSocialWorkItem } from './socialValidation';
 
 const scratch = join(repoRoot, '.asset-scratch', 'vitest-social-release-one');
+function writeSyntheticImage(path: string): void {
+  const sharpPath = createRequire(import.meta.url).resolve('sharp');
+  const result = spawnSync(process.execPath, ['-e', `const sharp=require(process.argv[1]);sharp({create:{width:1080,height:1080,channels:3,background:'#446688'}}).png().toFile(process.argv[2]).catch(()=>process.exit(1))`, sharpPath, path]);
+  if (result.status !== 0) throw new Error('Unable to create synthetic image');
+}
 
 afterEach(() => { vi.restoreAllMocks(); rmSync(scratch, { force: true, recursive: true }); });
 
@@ -24,7 +32,7 @@ describe('Social Release 1 persistence and claim integration', () => {
   it('carries a canvas mark through claimed immutable composition while preserving tenancy and zero Buffer mutation', () => {
     mkdirSync(scratch, { recursive: true });
     const media = join(scratch, 'synthetic-release-one-image.png');
-    writeFileSync(media, Buffer.from('synthetic-release-one-media'));
+    writeSyntheticImage(media);
     useLineageTestProfile(join(scratch, 'lineage.sqlite'));
     indexLineageAssets(defaultProject);
     const assetId = `local-${fileSha256(media).slice(0, 12)}`;
@@ -47,8 +55,8 @@ describe('Social Release 1 persistence and claim integration', () => {
     try {
       const timestamp = nowIso();
       database.prepare(`insert into buffer_channels (project_id, channel_id, organization_id, service, service_id, display_name, avatar_ref, timezone, posting_schedule_json, allowed_actions_json, capability_json, disconnected, locked, paused, available, capability_registry_version, provider_fingerprint, synced_at, stale_at)
-        values (?, ?, 'synthetic-release-one-organization', 'instagram', null, 'Synthetic Canvas Channel', null, 'America/Phoenix', '{}', '["read"]', ?, 0, 0, 0, 1, 1, ?, ?, null)`)
-        .run(defaultProject, channelId, JSON.stringify({ automatic: true, image_post: true, notification: true, scheduling_modes: ['customScheduled', 'addToQueue'], supported: true, reason: null }), providerFingerprint, timestamp);
+        values (?, ?, 'synthetic-release-one-organization', 'instagram', null, 'Synthetic Canvas Channel', null, 'America/Phoenix', ?, '["read"]', ?, 0, 0, 0, 1, ?, ?, ?, null)`)
+        .run(defaultProject, channelId, JSON.stringify({ slots: ['09:00'] }), JSON.stringify(bufferChannelCapability('instagram')), BUFFER_CAPABILITY_REGISTRY_VERSION, providerFingerprint, timestamp);
     } finally { database.close(); }
 
     const created = createSocialWorkItem(defaultProject, { rootAssetId: assetId, sourceAssetId: assetId, campaignKey: 'synthetic-campaign', actor: 'human:release-one', claimToken: claim.claim_token, confirmWrite: true });

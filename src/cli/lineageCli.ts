@@ -30,6 +30,9 @@ import { getLineageBrief, linkSelectedLineageChild } from '../server/assetLineag
 import { listAssetSocialMarks, markAssetSocial, unmarkAssetSocial } from '../server/social/socialMarks';
 import { addSocialVariant, createSocialWorkItem, editSocialVariant, getSocialWorkItem, removeSocialVariant } from '../server/social/socialWorkItems';
 import { validateSocialWorkItem } from '../server/social/socialValidation';
+import { reseedGate4QaFixture } from '../server/social/socialGate4QaFixture';
+import { previewSocialDelivery } from '../server/social/socialDelivery';
+import { createSocialAgentHandoff } from '../server/social/socialAgentHandoff';
 import { clearAssetDiscussionMarks, listAssetDiscussionMarks, markAssetDiscussion, noteAssetDiscussion, unmarkAssetDiscussion } from '../server/assetDiscussionMarks';
 import {
   addLineageTaskComment,
@@ -326,6 +329,8 @@ Usage:
   ${config.binName} social variant edit --project <project> --variant <variant-id> --expected-revision <number> [--copy <text>] [--hashtag <tag>] [--hashtag-placement caption|first_comment] [--alt-text <text>] [--alt-text-reviewed --alt-text-reviewed-by <actor>] [--publish-method automatic|notification] [--composition-mode customScheduled|addToQueue] [--custom-scheduled-at <zoned-iso-time>] --confirm-write [--actor <actor>] [--claim-token <claim-id.secret>] [--json]
   ${config.binName} social variant remove --project <project> --variant <variant-id> --expected-revision <number> --confirm-write [--actor <actor>] [--claim-token <claim-id.secret>] [--json]
   ${config.binName} social validate --project <project> --item <item-id> [--json]
+  ${config.binName} social delivery preview --project <project> --variant <variant-id> --expected-revision <number> [--json]
+  ${config.binName} social agent-handoff prepare --project <project> --variant <variant-id> --expected-revision <number> --preview-sha256 <sha256> [--json]
   ${config.binName} discuss list --project <project> --root <asset-id> [--db <path>] [--json]
   ${config.binName} discuss mark --project <project> --root <asset-id> --asset <asset-id-or-exact-title> --confirm-write [--actor <actor>] [--notes <text>] [--claim-token <claim-id.secret>] [--db <path>] [--json]
   ${config.binName} discuss note --project <project> --root <asset-id> --asset <asset-id-or-exact-title> --notes <text> --confirm-write [--actor <actor>] [--claim-token <claim-id.secret>] [--db <path>] [--json]
@@ -670,7 +675,7 @@ function resolveDataCommandOptions(args: string[]): DataCommandOptions {
   return options;
 }
 
-export function runLineageDataCommand(command: string, args: string[]): unknown {
+export function runLineageDataCommand(command: string, args: string[], _deps: unknown = {}): unknown {
   const options = resolveDataCommandOptions(args);
   if (command === 'next') return getLineageNextAsset(options.project, options.rootAssetId || options.assetId);
   if (command === 'brief') return getLineageBrief(options.project, options.rootAssetId || options.assetId);
@@ -961,6 +966,14 @@ export function runLineageDataCommand(command: string, args: string[]): unknown 
     const explicitProject = readOption(args, '--project');
     const asset = readOption(args, '--asset');
     if (!explicitProject) throw new Error(`lineage social ${subcommand || 'command'} requires --project`);
+    if (subcommand === 'qa') {
+      const operation = positions[1] || '';
+      if (operation === 'reseed-gate4') {
+        assertSocialCliInput(args, positions, ['qa', 'reseed-gate4'], [], ['--confirm-write']);
+        return reseedGate4QaFixture(explicitProject, { confirmWrite: options.confirmWrite });
+      }
+      throw new Error(`Unknown social qa command: ${operation}`);
+    }
     if (subcommand === 'item') {
       const operation = positions[1] || '';
       if (operation === 'show') {
@@ -1003,13 +1016,15 @@ export function runLineageDataCommand(command: string, args: string[]): unknown 
         });
       }
       if (operation === 'edit') {
-        assertSocialCliInput(args, positions, ['variant', 'edit'], ['--variant', '--expected-revision', '--copy', '--hashtag', '--hashtag-placement', '--alt-text', '--alt-text-reviewed-by', '--publish-method', '--composition-mode', '--custom-scheduled-at', '--actor', '--claim-token'], ['--alt-text-reviewed', '--confirm-write']);
+        assertSocialCliInput(args, positions, ['variant', 'edit'], ['--variant', '--expected-revision', '--copy', '--hashtag', '--hashtag-placement', '--alt-text', '--alt-text-reviewed-by', '--editorial-state', '--publish-method', '--composition-mode', '--custom-scheduled-at', '--actor', '--claim-token'], ['--alt-text-reviewed', '--confirm-write']);
         const placement = readOption(args, '--hashtag-placement');
         if (placement && placement !== 'caption' && placement !== 'first_comment') throw new Error('--hashtag-placement must be caption or first_comment');
         const method = readOption(args, '--publish-method');
         if (method && method !== 'automatic' && method !== 'notification') throw new Error('--publish-method must be automatic or notification');
         const mode = readOption(args, '--composition-mode');
         if (mode && mode !== 'customScheduled' && mode !== 'addToQueue') throw new Error('--composition-mode must be customScheduled or addToQueue');
+        const editorialState = readOption(args, '--editorial-state');
+        if (editorialState && !['draft', 'needs_review', 'ready'].includes(editorialState)) throw new Error('--editorial-state must be draft, needs_review, or ready');
         const expected = readOption(args, '--expected-revision');
         if (expected === undefined) throw new Error('expectedRevision is required');
         if (!Number.isInteger(Number(expected)) || Number(expected) < 1) throw new Error('--expected-revision must be a positive integer');
@@ -1019,6 +1034,7 @@ export function runLineageDataCommand(command: string, args: string[]): unknown 
           altTextReviewedBy: readOption(args, '--alt-text-reviewed-by'), claimToken: options.claimToken,
           compositionMode: mode as 'customScheduled' | 'addToQueue' | undefined, confirmWrite: options.confirmWrite,
           copy: readOption(args, '--copy'), customScheduledAt: readOption(args, '--custom-scheduled-at'),
+          editorialState: editorialState as 'draft' | 'needs_review' | 'ready' | undefined,
           expectedRevision: Number(expected),
           hashtagPlacement: placement as 'caption' | 'first_comment' | undefined,
           hashtags: args.some(arg => arg === '--hashtag' || arg.startsWith('--hashtag=')) ? readOptions(args, '--hashtag') : undefined,
@@ -1026,6 +1042,30 @@ export function runLineageDataCommand(command: string, args: string[]): unknown 
         });
       }
       throw new Error(`Unknown social variant command: ${operation}`);
+    }
+    if (subcommand === 'delivery') {
+      const operation = positions[1] || '';
+      const variantId = readOption(args, '--variant');
+      const expected = readOption(args, '--expected-revision');
+      if (!variantId) throw new Error(`lineage social delivery ${operation || 'command'} requires --variant`);
+      if (expected === undefined || !Number.isInteger(Number(expected)) || Number(expected) < 1) throw new Error('--expected-revision must be a positive integer');
+      if (operation === 'preview') {
+        assertSocialCliInput(args, positions, ['delivery', 'preview'], ['--variant', '--expected-revision']);
+        return previewSocialDelivery(explicitProject, { variantId, expectedRevision: Number(expected) });
+      }
+      throw new Error(`Unknown social delivery command: ${operation}`);
+    }
+    if (subcommand === 'agent-handoff') {
+      const operation = positions[1] || '';
+      assertSocialCliInput(args, positions, ['agent-handoff', operation], ['--variant', '--expected-revision', '--preview-sha256']);
+      if (operation !== 'prepare') throw new Error(`Unknown social agent-handoff command: ${operation}`);
+      const variantId = readOption(args, '--variant');
+      const expected = readOption(args, '--expected-revision');
+      const previewSha256 = readOption(args, '--preview-sha256');
+      if (!variantId || expected === undefined || !Number.isInteger(Number(expected)) || Number(expected) < 1 || !previewSha256) {
+        throw new Error('lineage social agent-handoff prepare requires --variant, --expected-revision, and --preview-sha256');
+      }
+      return createSocialAgentHandoff(explicitProject, { variantId, expectedRevision: Number(expected), previewSha256 });
     }
     if (subcommand === 'validate') {
       assertSocialCliInput(args, positions, ['validate'], ['--item']);
@@ -1489,8 +1529,10 @@ export function lineageCliRequiresWriterLease(command: string, args: string[]): 
   if (command === 'generate') return positions[0] !== 'image' || positions[1] !== 'inspect';
   if (command === 'reroll') return subcommand !== 'list';
   if (command === 'social') {
+    if (subcommand === 'qa') return positions[1] === 'reseed-gate4';
     if (subcommand === 'list' || subcommand === 'validate') return false;
     if (subcommand === 'item') return positions[1] !== 'show';
+    if (subcommand === 'delivery' || subcommand === 'agent-handoff') return false;
     return true;
   }
   if (command === 'discuss') return subcommand !== 'list';
@@ -1508,6 +1550,7 @@ export function lineageCliCanDelegateMutation(command: string, args: string[]): 
   if (command === 'generate') return positions[0] === 'image' && ['plan', 'scaffold', 'import', 'cancel'].includes(positions[1] || '');
   if (command === 'reroll') return ['mark', 'cancel', 'plan', 'import'].includes(subcommand);
   if (command === 'social') {
+    if (subcommand === 'qa') return false;
     if (['mark', 'unmark'].includes(subcommand)) return true;
     return subcommand === 'item' && positions[1] === 'create'
       || subcommand === 'variant' && ['add', 'edit', 'remove'].includes(positions[1] || '');
@@ -1516,6 +1559,14 @@ export function lineageCliCanDelegateMutation(command: string, args: string[]): 
   if (command === 'tasks') return ['claim', 'start', 'comment', 'cancel', 'override', 'instructions'].includes(subcommand);
   if (command === 'agent') return ['claim', 'heartbeat', 'release', 'revoke', 'transfer'].includes(subcommand);
   return false;
+}
+
+export function lineageCliServiceLeaseConflictMessage(command: string, args: string[], profileId: string): string | undefined {
+  const positions = positionalArgs(args);
+  if (command === 'social' && positions[0] === 'qa' && positions[1] === 'reseed-gate4') {
+    return `social qa ${positions[1]} requires the managed service for profile ${profileId} to be stopped; this command cannot be delegated`;
+  }
+  return undefined;
 }
 
 function argsWithoutProfileSelector(args: string[]): string[] {
@@ -1882,6 +1933,8 @@ export async function runLineageCli(config: LineageCliConfig, args = process.arg
           process.once('exit', writerLease.release);
         } catch (error) {
           if (!(error instanceof ProfileWriterLeaseConflictError) || error.owner.role !== 'service') throw error;
+          const localRefusal = lineageCliServiceLeaseConflictMessage(command, normalizedArgs.slice(1), profile.profile_id);
+          if (localRefusal) throw new Error(localRefusal, { cause: error });
           process.env.LINEAGE_DB_ACCESS = 'read-only';
           managedWriterProfile = profile;
         }

@@ -1102,6 +1102,13 @@ function projectStateDigest(database: DatabaseSync, project: string): string {
     'generation_target_defaults',
     'node_next_output_target_settings',
     'adapter_settings',
+    'buffer_connections',
+    'buffer_channels',
+    'social_work_items',
+    'social_variants',
+    'social_provider_post_links',
+    'social_provider_post_snapshots',
+    'social_media_renditions',
     'lineage_tasks',
     'agent_claims',
     'deleted_lineage_workspaces',
@@ -1154,6 +1161,18 @@ function projectStateDigest(database: DatabaseSync, project: string): string {
         or asset_id in (select id from assets where project_id = ?)
       order by rowid
     `).all(project, project),
+    social_variant_revisions: database.prepare(`
+      select rowid, * from social_variant_revisions where variant_id in (
+        select id from social_variants where project_id = ?
+      ) order by rowid
+    `).all(project),
+    social_hashtags: database.prepare(`
+      select rowid, * from social_hashtags where revision_id in (
+        select id from social_variant_revisions where variant_id in (
+          select id from social_variants where project_id = ?
+        )
+      ) order by rowid
+    `).all(project),
     lineage_task_events: database.prepare(`
       select rowid, * from lineage_task_events where task_id in (
         select id from lineage_tasks where project_id = ?

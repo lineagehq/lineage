@@ -125,7 +125,12 @@ export function LineageSocialPanel({ isTransitionLocked, node, onClose, onDirtyC
     if (transitionLocked) panel.setAttribute('inert', '');
     else panel.removeAttribute('inert');
   }, [transitionLocked]);
-  useEffect(() => { if (transitionLocked) setLoading(false); }, [transitionLocked]);
+  useEffect(() => {
+    if (!transitionLocked) return;
+    setLoading(false);
+    setDeliveryBusy(false);
+    deliveryInFlight.current = false;
+  }, [transitionLocked]);
   useEffect(() => {
     if (!transitionLocked && !isTransitionLocked?.()) setInteractionLockGeneration(0);
   }, [isTransitionLocked, transitionLocked]);

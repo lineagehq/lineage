@@ -15,6 +15,7 @@ describe('Buffer insights runtime', () => {
     runtime.listSentPosts({ credentialRef: `env:${credentialKey}`, organizationId: 'org-1' }, 'channel-1');
     expect(calls).toHaveLength(2);
     expect(calls.map(call => call.args.slice(1, 3))).toEqual([['posts', 'get'], ['posts', 'list']]);
+    expect(calls.every(call => call.args.join(' ').includes('assets.{__typename,id,type,mimeType,source,image.{altText,width,height,isAnimated}}'))).toBe(true);
     expect(calls.flatMap(call => call.args).join(' ')).not.toContain('secret-insights-key');
     expect(calls.every(call => call.env[credentialKey] === 'secret-insights-key' && call.env.HOME === call.env.XDG_CONFIG_HOME)).toBe(true);
   });

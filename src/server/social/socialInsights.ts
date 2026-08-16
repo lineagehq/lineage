@@ -9,6 +9,7 @@ import { SocialDeliveryError } from './socialDelivery';
 const metricTypes = new Set<SocialProviderMetric['type']>([
   'reactions', 'comments', 'shares', 'reposts', 'reach', 'impressions', 'views', 'clicks', 'engagementRate',
   'saves', 'follows', 'quotes', 'viewers', 'totalTimeWatched', 'likes',
+  'replies', 'favorites', 'reblogs', 'retweets', 'repins', 'link_clicks', 'other',
 ]);
 const postIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
 
@@ -17,17 +18,19 @@ interface ProviderPost {
   text: string;
   channelId: string;
   firstComment?: string;
-  status: 'scheduled' | 'sending' | 'sent';
+  status: 'needs_approval' | 'scheduled' | 'sending' | 'sent' | 'error';
   externalLink?: string;
   dueAt?: string;
   sentAt?: string;
   metrics: SocialProviderMetric[];
   metricsUpdatedAt?: string;
+  image: { id: string; mimeType: 'image/png' | 'image/jpeg'; altText: string; width: number; height: number; identitySha256: string };
 }
 
 interface LinkRow {
   id: string; project_id: string; variant_id: string; revision: number; preview_sha256: string;
   provider_post_id: string; channel_id: string; rendered_text_sha256: string; first_comment_sha256: string | null;
+  provider_asset_sha256: string | null;
 }
 
 interface SnapshotRow {
@@ -54,7 +57,7 @@ function normalizePost(value: unknown, expectedId: string): ProviderPost {
   const row = value as Record<string, unknown>;
   if (row.id !== expectedId || !postIdPattern.test(expectedId)) throw new SocialDeliveryError('Buffer post identity does not match', 409, 'provider_identity_mismatch');
   if (typeof row.text !== 'string' || typeof row.channelId !== 'string') throw new SocialDeliveryError('Buffer post content identity is invalid', 502, 'provider_response_invalid');
-  if (row.status !== 'scheduled' && row.status !== 'sending' && row.status !== 'sent') throw new SocialDeliveryError('Buffer post is not scheduled or sent', 409, 'provider_status_invalid');
+  if (row.status !== 'needs_approval' && row.status !== 'scheduled' && row.status !== 'sending' && row.status !== 'sent' && row.status !== 'error') throw new SocialDeliveryError('Buffer post status is invalid', 409, 'provider_status_invalid');
   let externalLink: string | undefined;
   if (row.externalLink !== null && row.externalLink !== undefined) {
     if (typeof row.externalLink !== 'string') throw new SocialDeliveryError('Buffer external link is invalid', 502, 'provider_response_invalid');
@@ -64,6 +67,21 @@ function normalizePost(value: unknown, expectedId: string): ProviderPost {
     externalLink = url.href;
   }
   if (row.metrics !== null && row.metrics !== undefined && !Array.isArray(row.metrics)) throw new SocialDeliveryError('Buffer metrics are invalid', 502, 'provider_response_invalid');
+  if (!Array.isArray(row.assets) || row.assets.length !== 1) throw new SocialDeliveryError('Buffer post must contain exactly one image', 409, 'provider_identity_mismatch');
+  const rawAsset = row.assets[0];
+  if (!rawAsset || typeof rawAsset !== 'object' || Array.isArray(rawAsset)) throw new SocialDeliveryError('Buffer image identity is invalid', 502, 'provider_response_invalid');
+  const asset = rawAsset as Record<string, unknown>;
+  const image = asset.image;
+  if (asset.__typename !== 'ImageAsset' || typeof asset.id !== 'string' || !asset.id.trim()
+    || (asset.mimeType !== 'image/png' && asset.mimeType !== 'image/jpeg')
+    || !image || typeof image !== 'object' || Array.isArray(image)) throw new SocialDeliveryError('Buffer image identity is invalid', 409, 'provider_identity_mismatch');
+  const imageFields = image as Record<string, unknown>;
+  if (typeof imageFields.altText !== 'string' || !Number.isInteger(imageFields.width) || Number(imageFields.width) <= 0
+    || !Number.isInteger(imageFields.height) || Number(imageFields.height) <= 0 || imageFields.isAnimated === true) throw new SocialDeliveryError('Buffer image identity is invalid', 409, 'provider_identity_mismatch');
+  const normalizedImage = {
+    id: asset.id, mimeType: asset.mimeType, altText: imageFields.altText,
+    width: Number(imageFields.width), height: Number(imageFields.height),
+  } as const;
   let firstComment: string | undefined;
   if (row.metadata !== null && row.metadata !== undefined) {
     if (typeof row.metadata !== 'object' || Array.isArray(row.metadata)) throw new SocialDeliveryError('Buffer post metadata is invalid', 502, 'provider_response_invalid');
@@ -87,7 +105,15 @@ function normalizePost(value: unknown, expectedId: string): ProviderPost {
     ...(optionalDate(row.dueAt, 'dueAt') ? { dueAt: optionalDate(row.dueAt, 'dueAt') } : {}),
     ...(optionalDate(row.sentAt, 'sentAt') ? { sentAt: optionalDate(row.sentAt, 'sentAt') } : {}),
     metrics, ...(optionalDate(row.metricsUpdatedAt, 'metricsUpdatedAt') ? { metricsUpdatedAt: optionalDate(row.metricsUpdatedAt, 'metricsUpdatedAt') } : {}),
+    image: { ...normalizedImage, identitySha256: digest(normalizedImage) },
   };
+}
+
+function assertHandoffImage(post: ProviderPost, handoff: ReturnType<typeof recreateSocialAgentHandoffEvidence>): void {
+  if (post.image.mimeType !== handoff.media.content_type || post.image.altText !== handoff.alt_text
+    || post.image.width !== handoff.media.width || post.image.height !== handoff.media.height) {
+    throw new SocialDeliveryError('Buffer post image does not match the immutable Lineage brief', 409, 'provider_identity_mismatch');
+  }
 }
 
 function connection(project: string): { credentialRef: string; organizationId: string } {
@@ -158,17 +184,19 @@ export function linkSocialProviderPost(project: string, input: { variantId: stri
   });
   const post = readPost(runtime, project, input.providerPostId);
   if (post.channelId !== handoff.channel.id || post.text !== handoff.rendered_text || (post.firstComment || undefined) !== (handoff.first_comment || undefined)) throw new SocialDeliveryError('Buffer post does not match the immutable Lineage brief', 409, 'provider_identity_mismatch');
+  if (handoff.composition_mode === 'customScheduled' && post.dueAt !== new Date(handoff.custom_scheduled_at!).toISOString()) throw new SocialDeliveryError('Buffer post does not match the immutable Lineage schedule', 409, 'provider_identity_mismatch');
+  assertHandoffImage(post, handoff);
   const link: LinkRow = {
     id: digest({ project, providerPostId: input.providerPostId, preview: handoff.preview_sha256 }), project_id: project, variant_id: handoff.variant_id,
-    revision: handoff.revision, preview_sha256: handoff.preview_sha256, provider_post_id: input.providerPostId, channel_id: handoff.channel.id, rendered_text_sha256: textDigest(handoff.rendered_text), first_comment_sha256: handoff.first_comment ? textDigest(handoff.first_comment) : null,
+    revision: handoff.revision, preview_sha256: handoff.preview_sha256, provider_post_id: input.providerPostId, channel_id: handoff.channel.id, rendered_text_sha256: textDigest(handoff.rendered_text), first_comment_sha256: handoff.first_comment ? textDigest(handoff.first_comment) : null, provider_asset_sha256: post.image.identitySha256,
   };
   const database = lineageDb();
   try {
     database.exec('begin immediate');
     const prior = database.prepare('select * from social_provider_post_links where project_id=? and provider_post_id=?').get(project, input.providerPostId) as LinkRow | undefined;
-    if (prior && (prior.variant_id !== link.variant_id || prior.preview_sha256 !== link.preview_sha256 || prior.rendered_text_sha256 !== link.rendered_text_sha256 || prior.first_comment_sha256 !== link.first_comment_sha256)) throw new SocialDeliveryError('Buffer post is already linked to different Lineage evidence', 409, 'provider_identity_mismatch');
-    if (!prior) database.prepare(`insert into social_provider_post_links (id,project_id,variant_id,revision_id,revision,preview_sha256,provider_post_id,channel_id,rendered_text_sha256,first_comment_sha256,created_at)
-      values (?,?,?,?,?,?,?,?,?,?,?)`).run(link.id, project, handoff.variant_id, handoff.revision_id, handoff.revision, handoff.preview_sha256, input.providerPostId, handoff.channel.id, link.rendered_text_sha256, link.first_comment_sha256, now);
+    if (prior && (prior.variant_id !== link.variant_id || prior.preview_sha256 !== link.preview_sha256 || prior.rendered_text_sha256 !== link.rendered_text_sha256 || prior.first_comment_sha256 !== link.first_comment_sha256 || (prior.provider_asset_sha256 !== null && prior.provider_asset_sha256 !== link.provider_asset_sha256))) throw new SocialDeliveryError('Buffer post is already linked to different Lineage evidence', 409, 'provider_identity_mismatch');
+    if (!prior) database.prepare(`insert into social_provider_post_links (id,project_id,variant_id,revision_id,revision,preview_sha256,provider_post_id,channel_id,rendered_text_sha256,first_comment_sha256,provider_asset_sha256,created_at)
+      values (?,?,?,?,?,?,?,?,?,?,?,?)`).run(link.id, project, handoff.variant_id, handoff.revision_id, handoff.revision, handoff.preview_sha256, input.providerPostId, handoff.channel.id, link.rendered_text_sha256, link.first_comment_sha256, link.provider_asset_sha256, now);
     const stored = (prior || database.prepare('select * from social_provider_post_links where id=?').get(link.id)) as LinkRow;
     const snapshot = writeSnapshot(database, project, stored, post, now);
     database.exec('commit');
@@ -198,7 +226,7 @@ export function syncSocialProviderPost(project: string, variantId: string, field
       writeKind: 'social_provider_post_sync',
     });
     const post = readPost(runtime, project, link.provider_post_id);
-    if (post.channelId !== link.channel_id || textDigest(post.text) !== link.rendered_text_sha256 || (post.firstComment ? textDigest(post.firstComment) : null) !== link.first_comment_sha256) throw new SocialDeliveryError('Buffer post identity changed', 409, 'provider_identity_mismatch');
+    if (post.channelId !== link.channel_id || textDigest(post.text) !== link.rendered_text_sha256 || (post.firstComment ? textDigest(post.firstComment) : null) !== link.first_comment_sha256 || (link.provider_asset_sha256 !== null && post.image.identitySha256 !== link.provider_asset_sha256)) throw new SocialDeliveryError('Buffer post identity changed', 409, 'provider_identity_mismatch');
     database.exec('begin immediate'); const snapshot = writeSnapshot(database, project, link, post, now); database.exec('commit');
     return response(link, snapshot.row, snapshot.idempotent, now);
   } catch (error) { try { database.exec('rollback'); } catch { /* inactive */ } throw error; }

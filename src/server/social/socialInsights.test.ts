@@ -41,7 +41,11 @@ function setup(hashtagPlacement: 'caption' | 'first_comment' = 'caption', custom
 }
 
 function runtime(post: Record<string, unknown>): BufferInsightsRuntime {
-  return { verify: vi.fn(), getPost: vi.fn(() => post), listSentPosts: vi.fn() };
+  const assets = Object.hasOwn(post, 'assets') ? post.assets : [{
+    __typename: 'ImageAsset', id: 'provider-image-1', type: 'image', mimeType: 'image/png', source: 'https://example.test/image.png',
+    image: { altText: 'Blue rectangle', width: 1200, height: 628, isAnimated: false },
+  }];
+  return { verify: vi.fn(), getPost: vi.fn(() => ({ ...post, assets })), listSentPosts: vi.fn() };
 }
 
 afterEach(() => rmSync(scratch, { force: true, recursive: true }));
@@ -57,6 +61,11 @@ describe('Social provider post insights', () => {
     const synced = syncSocialProviderPost(defaultProject, variant.id, { confirmWrite: true, claimToken }, sentRuntime, '2026-08-22T13:00:00.000Z');
     expect(synced).toMatchObject({ status: 'sent', stale: false, external_link: 'https://linkedin.com/feed/update/post-1', metrics: [{ type: 'engagementRate' }, { type: 'impressions' }] });
     expect(syncSocialProviderPost(defaultProject, variant.id, { confirmWrite: true, claimToken }, sentRuntime, '2026-08-22T14:00:00.000Z').idempotent).toBe(true);
+    const failed = syncSocialProviderPost(defaultProject, variant.id, { confirmWrite: true, claimToken }, runtime({
+      id: providerPostId, text: 'Insights caption\n\n#lineageqa', channelId, status: 'error',
+      metrics: [{ type: 'retweets', name: 'Legacy retweets', value: 2, unit: 'count' }],
+    }), '2026-08-22T15:00:00.000Z');
+    expect(failed).toMatchObject({ status: 'error', idempotent: false, metrics: [{ type: 'retweets', value: 2 }] });
     const wrongChannel = createAgentClaim({
       agentName: 'Wrong sync channel', project: defaultProject, channel: 'instagram', scopeType: 'project_channel',
       targetId: `${defaultProject}:instagram`, force: true, reason: 'Prove that a foreign-channel token cannot authorize LinkedIn insight sync.',
@@ -65,7 +74,7 @@ describe('Social provider post insights', () => {
     const database = lineageDb();
     try {
       expect(database.prepare('select count(*) count from social_provider_post_links').get()).toEqual({ count: 1 });
-      expect(database.prepare('select count(*) count from social_provider_post_snapshots').get()).toEqual({ count: 2 });
+      expect(database.prepare('select count(*) count from social_provider_post_snapshots').get()).toEqual({ count: 3 });
       expect(database.prepare("select name from sqlite_master where type='table' and name='social_delivery_operations'").get()).toBeUndefined();
     } finally { database.close(); }
   });
@@ -75,7 +84,7 @@ describe('Social provider post insights', () => {
     expect(() => linkSocialProviderPost(defaultProject, { variantId: variant.id, expectedRevision: 2, previewSha256: preview.preview_sha256, providerPostId: 'post-2' }, runtime(base))).toThrow('confirmWrite');
     expect(() => linkSocialProviderPost(defaultProject, { variantId: variant.id, expectedRevision: 2, previewSha256: '0'.repeat(64), providerPostId: 'post-2', claimToken, confirmWrite: true }, runtime(base))).toThrow('preview changed');
     expect(() => linkSocialProviderPost(defaultProject, { variantId: variant.id, expectedRevision: 2, previewSha256: preview.preview_sha256, providerPostId: 'post-2', claimToken, confirmWrite: true }, runtime({ ...base, channelId: 'other' }))).toThrow('does not match');
-    expect(() => linkSocialProviderPost(defaultProject, { variantId: variant.id, expectedRevision: 2, previewSha256: preview.preview_sha256, providerPostId: 'post-2', claimToken, confirmWrite: true }, runtime({ ...base, metrics: [{ type: 'retweets', name: 'legacy', value: 2, unit: 'count' }] }))).toThrow('metric is invalid');
+    expect(() => linkSocialProviderPost(defaultProject, { variantId: variant.id, expectedRevision: 2, previewSha256: preview.preview_sha256, providerPostId: 'post-2', claimToken, confirmWrite: true }, runtime({ ...base, metrics: [{ type: 'made_up_metric', name: 'invalid', value: 2, unit: 'count' }] }))).toThrow('metric is invalid');
     expect(() => linkSocialProviderPost(defaultProject, { variantId: variant.id, expectedRevision: 2, previewSha256: preview.preview_sha256, providerPostId: 'post-2', confirmWrite: true }, runtime(base))).toThrow('matching claim token');
     const wrongChannel = createAgentClaim({
       agentName: 'Wrong channel', project: defaultProject, channel: 'instagram', scopeType: 'project_channel',
@@ -95,6 +104,30 @@ describe('Social provider post insights', () => {
     expect(linked).toMatchObject({ provider_post_id: providerPostId, status: 'sent', due_at: scheduledAt, sent_at: observedAt });
   });
 
+  it('rejects a custom-scheduled post whose provider time differs from the immutable brief', () => {
+    const scheduledAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const { channelId, claimToken, preview, variant } = setup('caption', scheduledAt);
+    expect(() => linkSocialProviderPost(defaultProject, {
+      variantId: variant.id, expectedRevision: 2, previewSha256: preview.preview_sha256,
+      providerPostId: 'wrong-scheduled-time', claimToken, confirmWrite: true,
+    }, runtime({
+      id: 'wrong-scheduled-time', text: 'Insights caption\n\n#lineageqa', channelId, status: 'scheduled',
+      dueAt: new Date(Date.parse(scheduledAt) + 30 * 60 * 1000).toISOString(), metrics: [],
+    }))).toThrow('immutable Lineage schedule');
+  });
+
+  it('rejects provider media or alt text that differs from the immutable brief', () => {
+    const { channelId, claimToken, preview, variant } = setup();
+    const base = { id: 'wrong-media', text: 'Insights caption\n\n#lineageqa', channelId, status: 'scheduled', metrics: [] };
+    expect(() => linkSocialProviderPost(defaultProject, {
+      variantId: variant.id, expectedRevision: 2, previewSha256: preview.preview_sha256,
+      providerPostId: 'wrong-media', claimToken, confirmWrite: true,
+    }, runtime({ ...base, assets: [{
+      __typename: 'ImageAsset', id: 'other-image', type: 'image', mimeType: 'image/png', source: 'https://example.test/other.png',
+      image: { altText: 'Different alt text', width: 1200, height: 628, isAnimated: false },
+    }] }))).toThrow('image does not match');
+  });
+
   it('binds first-comment hashtags into exact association and later sync identity', () => {
     const { channelId, claimToken, preview, variant } = setup('first_comment');
     const input = { variantId: variant.id, expectedRevision: 2, previewSha256: preview.preview_sha256, claimToken, confirmWrite: true };
@@ -103,5 +136,21 @@ describe('Social provider post insights', () => {
     const linked = linkSocialProviderPost(defaultProject, { ...input, providerPostId: 'exact-comment' }, runtime({ id: 'exact-comment', text: 'Insights caption', channelId, status: 'scheduled', metadata: { firstComment: '#lineageqa' }, metrics: [] }));
     expect(linked.provider_post_id).toBe('exact-comment');
     expect(() => syncSocialProviderPost(defaultProject, variant.id, { confirmWrite: true, claimToken }, runtime({ id: 'exact-comment', text: 'Insights caption', channelId, status: 'sent', metadata: { firstComment: '#changed' }, metrics: [] }))).toThrow('identity changed');
+  });
+
+  it('keeps pre-asset-fingerprint provider links readable and syncable after schema upgrade', () => {
+    const { channelId, claimToken, preview, variant } = setup();
+    const providerPostId = 'legacy-provider-link';
+    const post = { id: providerPostId, text: 'Insights caption\n\n#lineageqa', channelId, status: 'scheduled', metrics: [] };
+    linkSocialProviderPost(defaultProject, {
+      variantId: variant.id, expectedRevision: 2, previewSha256: preview.preview_sha256,
+      providerPostId, claimToken, confirmWrite: true,
+    }, runtime(post));
+    const database = lineageDb();
+    database.exec('drop trigger append_only_social_provider_post_links_update');
+    database.prepare('update social_provider_post_links set provider_asset_sha256=null where provider_post_id=?').run(providerPostId);
+    database.close();
+    expect(syncSocialProviderPost(defaultProject, variant.id, { confirmWrite: true, claimToken }, runtime({ ...post, status: 'sent' })))
+      .toMatchObject({ provider_post_id: providerPostId, status: 'sent' });
   });
 });

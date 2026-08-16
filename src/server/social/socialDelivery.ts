@@ -173,9 +173,9 @@ function compileSocialDeliveryInDatabase(database: DatabaseSync, project: string
     };
 }
 
-export function previewSocialDelivery(project: string, input: PreviewInput): SocialDeliveryPreview {
+export function previewSocialDelivery(project: string, input: PreviewInput, currentTime = Date.now()): SocialDeliveryPreview {
   const database = lineageDb();
-  try { return compileSocialDeliveryInDatabase(database, project, input).preview; }
+  try { return compileSocialDeliveryInDatabase(database, project, input, currentTime).preview; }
   finally { database.close(); }
 }
 

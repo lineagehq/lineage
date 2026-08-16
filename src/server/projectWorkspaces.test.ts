@@ -61,8 +61,8 @@ function insertSocialEvidence(project: string, assetId: string): void {
     insert into social_hashtags (revision_id, position, value) values ('fixture-social-revision', 0, 'fixture');
     insert into social_media_renditions (id, project_id, source_asset_id, source_attempt_id, source_attempt_asset_id, source_checksum_sha256, content_type, width, height, size_bytes, retention_state, created_at)
     values ('fixture-rendition', '${project}', '${assetId}', 'fixture-source-attempt', '${assetId}', '${'a'.repeat(64)}', 'image/png', 1200, 628, 10, 'referenced_indefinite', '${timestamp}');
-    insert into social_provider_post_links (id, project_id, variant_id, revision_id, revision, preview_sha256, provider_post_id, channel_id, rendered_text_sha256, first_comment_sha256, created_at)
-    values ('fixture-provider-link', '${project}', 'fixture-social-variant', 'fixture-social-revision', 1, '${'c'.repeat(64)}', 'fixture-provider-post', 'fixture-channel', '${'d'.repeat(64)}', null, '${timestamp}');
+    insert into social_provider_post_links (id, project_id, variant_id, revision_id, revision, preview_sha256, provider_post_id, channel_id, rendered_text_sha256, first_comment_sha256, provider_asset_sha256, created_at)
+    values ('fixture-provider-link', '${project}', 'fixture-social-variant', 'fixture-social-revision', 1, '${'c'.repeat(64)}', 'fixture-provider-post', 'fixture-channel', '${'d'.repeat(64)}', null, '${'f'.repeat(64)}', '${timestamp}');
     insert into social_provider_post_snapshots (id, project_id, link_id, provider_post_id, status, external_link, due_at, sent_at, metrics_json, metrics_updated_at, snapshot_sha256, observed_at)
     values ('fixture-provider-snapshot', '${project}', 'fixture-provider-link', 'fixture-provider-post', 'sent', 'https://example.test/post/fixture', '${timestamp}', '${timestamp}', '[]', '${timestamp}', '${'e'.repeat(64)}', '${timestamp}');
   `);
@@ -712,6 +712,15 @@ describe('project/workspace organization persistence', () => {
     changed.close();
     expect(() => deleteProject(project, {
       expectedDigest: plan.digest,
+      confirmation: 'Project Delete',
+      confirmWrite: true,
+    })).toThrow(/changed/i);
+    const socialPlan = planProjectDeletion(project);
+    const changedSocial = lineageDb();
+    changedSocial.prepare("update buffer_channels set display_name = 'Changed social channel' where project_id = ?").run(project);
+    changedSocial.close();
+    expect(() => deleteProject(project, {
+      expectedDigest: socialPlan.digest,
       confirmation: 'Project Delete',
       confirmWrite: true,
     })).toThrow(/changed/i);

@@ -17,6 +17,7 @@ import { addSocialVariant, createSocialWorkItem, editSocialVariant } from './soc
 import { createSocialAgentHandoff } from './socialAgentHandoff';
 
 const scratch = join(repoRoot, '.asset-scratch', 'vitest-social-agent-handoff');
+const fixtureNow = Date.parse('2026-08-14T12:00:00Z');
 
 function fixture(compositionMode: 'addToQueue' | 'customScheduled' = 'customScheduled', copy = 'Controlled agent caption') {
   mkdirSync(scratch, { recursive: true });
@@ -54,8 +55,8 @@ afterEach(() => rmSync(scratch, { force: true, recursive: true }));
 describe('Social agent handoff', () => {
   it('returns an immutable complete browser-session brief without creating delivery state', () => {
     const { image, variant } = fixture();
-    const preview = previewSocialDelivery(defaultProject, { variantId: variant.id, expectedRevision: 2 });
-    const handoff = createSocialAgentHandoff(defaultProject, { variantId: variant.id, expectedRevision: 2, previewSha256: preview.preview_sha256 }, Date.parse('2026-08-14T12:00:00Z'));
+    const preview = previewSocialDelivery(defaultProject, { variantId: variant.id, expectedRevision: 2 }, fixtureNow);
+    const handoff = createSocialAgentHandoff(defaultProject, { variantId: variant.id, expectedRevision: 2, previewSha256: preview.preview_sha256 }, fixtureNow);
     expect(handoff).toMatchObject({
       schema_version: 'lineage.social_agent_handoff.v1', preview_sha256: preview.preview_sha256, project: defaultProject,
       variant_id: variant.id, revision_id: preview.revision_id, revision: 2, buffer_url: `https://publish.buffer.com/channels/${preview.channel_id}/schedule`,
@@ -70,7 +71,7 @@ describe('Social agent handoff', () => {
     expect(handoff.agent_brief_markdown).toContain('## Exact first comment\n#lineageqa');
     expect(handoff.agent_brief_markdown).toContain('2026-08-21T10:00:00-07:00');
     expect(handoff.agent_brief_markdown).toContain('explicitly authorizes this exact immutable brief');
-    const second = createSocialAgentHandoff(defaultProject, { variantId: variant.id, expectedRevision: 2, previewSha256: preview.preview_sha256 }, Date.parse('2026-08-14T12:00:00Z'));
+    const second = createSocialAgentHandoff(defaultProject, { variantId: variant.id, expectedRevision: 2, previewSha256: preview.preview_sha256 }, fixtureNow);
     expect(second).toEqual(handoff);
     const database = lineageDb();
     try { expect(database.prepare("select name from sqlite_master where type='table' and name='social_delivery_operations'").get()).toBeUndefined(); }
@@ -79,12 +80,12 @@ describe('Social agent handoff', () => {
 
   it('rejects stale preview identity before producing a brief', () => {
     const { variant } = fixture();
-    expect(() => createSocialAgentHandoff(defaultProject, { variantId: variant.id, expectedRevision: 2, previewSha256: '0'.repeat(64) })).toThrow('preview changed');
+    expect(() => createSocialAgentHandoff(defaultProject, { variantId: variant.id, expectedRevision: 2, previewSha256: '0'.repeat(64) }, fixtureNow)).toThrow('preview changed');
   });
 
   it('rejects a ready revision with empty caption copy before producing a brief', () => {
     const { variant } = fixture('customScheduled', '');
-    expect(() => previewSocialDelivery(defaultProject, { variantId: variant.id, expectedRevision: 2 })).toThrow('Caption copy is required');
+    expect(() => previewSocialDelivery(defaultProject, { variantId: variant.id, expectedRevision: 2 }, fixtureNow)).toThrow('Caption copy is required');
   });
 
   it('rejects all-empty or paused per-day Buffer queue schedules', () => {
@@ -105,6 +106,6 @@ describe('Social agent handoff', () => {
       values (?, ?, ?, ?, 2, 'reroll', ?, ?, ?, ?, 1)`)
       .run('absolute-owned-attempt', defaultProject, assetId, assetId, image, fileSha256(image), nowIso(), nowIso());
     database.close();
-    expect(() => previewSocialDelivery(defaultProject, { variantId: variant.id, expectedRevision: 2 })).not.toThrow();
+    expect(() => previewSocialDelivery(defaultProject, { variantId: variant.id, expectedRevision: 2 }, fixtureNow)).not.toThrow();
   });
 });

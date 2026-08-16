@@ -654,6 +654,7 @@ export function lineageDb(): DatabaseSync {
       channel_id text not null,
       rendered_text_sha256 text not null,
       first_comment_sha256 text,
+      provider_asset_sha256 text,
       created_at text not null,
       unique(project_id, variant_id, provider_post_id),
       unique(project_id, provider_post_id)
@@ -792,6 +793,7 @@ export function lineageDb(): DatabaseSync {
   ensureGenerationReceiptCheckValues(database);
   ensureSocialVariantRevisionSchema(database);
   ensureSocialMediaSchema(database);
+  ensureColumn(database, 'social_provider_post_links', 'provider_asset_sha256', 'text');
   installSocialEvidenceAppendOnlyTriggers(database);
   ensureLifecycleWriteGuards(database);
   return database;

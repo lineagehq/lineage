@@ -57,7 +57,7 @@ function credential(connection: BufferInsightsConnection, env: NodeJS.ProcessEnv
   return value;
 }
 
-const postFields = 'id,text,status,createdAt,updatedAt,dueAt,sentAt,channelId,externalLink,metadata.firstComment,metrics.{type,name,value,unit},metricsUpdatedAt';
+const postFields = 'id,text,status,createdAt,updatedAt,dueAt,sentAt,channelId,externalLink,metadata.firstComment,assets.{__typename,id,type,mimeType,source,image.{altText,width,height,isAnimated}},metrics.{type,name,value,unit},metricsUpdatedAt';
 
 export function createBufferInsightsRuntime(options: { env?: NodeJS.ProcessEnv; spawn?: BufferSpawn } = {}): BufferInsightsRuntime {
   const spawn = options.spawn || spawnSync; const env = options.env || process.env;

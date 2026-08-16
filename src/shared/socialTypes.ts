@@ -191,7 +191,7 @@ export interface SocialAgentHandoff {
 }
 
 export interface SocialProviderMetric {
-  type: 'reactions' | 'comments' | 'shares' | 'reposts' | 'reach' | 'impressions' | 'views' | 'clicks' | 'engagementRate' | 'saves' | 'follows' | 'quotes' | 'viewers' | 'totalTimeWatched' | 'likes';
+  type: 'reactions' | 'comments' | 'shares' | 'reposts' | 'reach' | 'impressions' | 'views' | 'clicks' | 'engagementRate' | 'saves' | 'follows' | 'quotes' | 'viewers' | 'totalTimeWatched' | 'likes' | 'replies' | 'favorites' | 'reblogs' | 'retweets' | 'repins' | 'link_clicks' | 'other';
   name: string;
   value: number;
   unit: 'count' | 'percentage';
@@ -206,7 +206,7 @@ export interface SocialProviderPostInsights {
   revision: number;
   preview_sha256: string;
   channel_id: string;
-  status: 'scheduled' | 'sending' | 'sent';
+  status: 'needs_approval' | 'scheduled' | 'sending' | 'sent' | 'error';
   external_link?: string;
   due_at?: string;
   sent_at?: string;

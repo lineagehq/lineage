@@ -587,6 +587,31 @@ describe('LineageSocialPanel', () => {
     expect(container.textContent).toContain('Impressions140');
   });
 
+  it('restores delivery controls after a transition invalidates a pending preview', async () => {
+    const pendingPreview = deferred<never>();
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (path.includes('/connection?')) return Promise.resolve({ ok: true, connection: { project: 'demo', organization_id: 'org-1', health_state: 'connected', channel_synced_at: '2026-08-12T00:00:00Z', updated_at: '2026-08-12T00:00:00Z' } });
+      if (path.includes('/channels?')) return Promise.resolve({ ok: true, channels: [channel] });
+      if (path === '/api/social/items') return Promise.resolve({ schema_version: 'lineage.social_work_item.v1', item: item([readyVariant()]) });
+      if (path.endsWith('/delivery-preview')) return pendingPreview.promise;
+      return Promise.reject(new Error(`Unexpected ${path}`));
+    });
+    container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+    const render = (locked: boolean) => act(() => root!.render(createElement(LineageSocialPanel, {
+      node, onClose: vi.fn(), onMark: vi.fn(), project: 'demo', rootAssetId: 'root-1', transitionLocked: locked,
+    })));
+    render(false); await flush();
+    act(() => [...container!.querySelectorAll('button')].find(button => button.textContent === 'Create or open work item')!.click()); await flush();
+    const previewButton = () => [...container!.querySelectorAll('button')].find(button => button.textContent === 'Preview agent brief')!;
+    act(() => previewButton().click());
+    expect(previewButton().disabled).toBe(true);
+    render(true); await flush();
+    await act(async () => pendingPreview.reject(new Error('stale preview failure')));
+    render(false); await flush();
+    expect(previewButton().disabled).toBe(false);
+    expect(container.textContent).not.toContain('stale preview failure');
+  });
+
   it('discards pending provider insights and post IDs when the selected variant changes', async () => {
     const secondChannel = { ...channel, channel_id: 'channel-2', display_name: 'Second channel' };
     const secondVariant = { ...readyVariant(), id: 'variant-2', channel_id: 'channel-2', revision: { ...readyVariant().revision, id: 'revision-variant-2', variant_id: 'variant-2' } };

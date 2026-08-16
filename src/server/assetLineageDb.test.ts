@@ -114,6 +114,9 @@ describe('asset Social-mark schema', () => {
       const insightColumns = database.prepare('pragma table_info(social_provider_post_snapshots)').all() as Array<{ name: string }>;
       expect(insightColumns.map(column => column.name)).toEqual(['id', 'project_id', 'link_id', 'provider_post_id', 'status', 'external_link', 'due_at', 'sent_at', 'metrics_json', 'metrics_updated_at', 'snapshot_sha256', 'observed_at']);
       expect(insightColumns.map(column => column.name)).not.toEqual(expect.arrayContaining(['credential_ref', 'api_key', 'provider_payload']));
+      const linkColumns = database.prepare('pragma table_info(social_provider_post_links)').all() as Array<{ name: string; notnull: number }>;
+      expect(linkColumns.map(column => column.name)).toContain('provider_asset_sha256');
+      expect(linkColumns.find(column => column.name === 'provider_asset_sha256')?.notnull).toBe(0);
     } finally { database.close(); rmSync(scratch, { recursive: true, force: true }); }
   });
 });

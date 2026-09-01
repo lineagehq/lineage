@@ -25,17 +25,17 @@ jobs:
         with:
           node-version: '22.22.3'
           cache: npm
-      - id: pages
-        uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v5
       - run: npm ci
       - run: node --test scripts/docs-check.test.mjs scripts/prepare-pages.test.mjs
       - name: Build documentation for its public base path
         env:
-          LINEAGE_DOCS_BASE: ${{ steps.pages.outputs.base_path }}/docs/
+          LINEAGE_DOCS_BASE: /docs/
+          LINEAGE_DOCS_SITE: https://lineage.neonwatty.com
         run: npm run docs:check
       - name: Build landing page for its public base path
         env:
-          LINEAGE_WEB_BASE: ${{ steps.pages.outputs.base_path }}/
+          LINEAGE_WEB_BASE: /
         run: npm run build:web
       - run: npm run pages:prepare
       - run: test -f dist/pages/index.html && test -f dist/pages/docs/index.html

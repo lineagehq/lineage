@@ -2,13 +2,13 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import 'cookie';
 
-const rawBase = process.env.LINEAGE_DOCS_BASE || '/lineage/docs/';
+const rawBase = process.env.LINEAGE_DOCS_BASE || '/docs/';
 const base = rawBase === '/' ? '/' : rawBase.replace(/\/$/, '');
 
 export default defineConfig({
   base,
   outDir: '../dist/docs-site',
-  site: process.env.LINEAGE_DOCS_SITE || 'https://mean-weasel.github.io',
+  site: process.env.LINEAGE_DOCS_SITE || 'https://lineage.neonwatty.com',
   integrations: [
     starlight({
       description: 'How to evaluate, use, operate, and integrate Lineage.',

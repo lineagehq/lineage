@@ -51,7 +51,7 @@ title: Home
 description: Documentation home.
 ---
 
-[Cloud storage](integrations/cloud-storage)
+[Cloud storage](/docs/integrations/cloud-storage)
 `);
     const capabilityPath = join(temporary, 'docs-site/src/content/docs/integrations/cloud-storage.md');
     write(capabilityPath, `---

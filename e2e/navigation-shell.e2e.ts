@@ -26,7 +26,7 @@ test('opens About Lineage from the brand with safe diagnostics and mobile access
   await expect(about.getByRole('button', { name: 'Close About Lineage' })).toBeFocused();
   await expect(about).toContainText('Runtime channel');
   await expect(about.getByRole('link', { name: /GitHub repository/ })).toHaveAttribute('href', 'https://github.com/mean-weasel/lineage');
-  await expect(about.getByRole('link', { name: /Documentation/ })).toHaveAttribute('href', 'https://mean-weasel.github.io/lineage/docs/');
+  await expect(about.getByRole('link', { name: /Documentation/ })).toHaveAttribute('href', 'https://lineage.neonwatty.com/docs/');
 
   await about.getByRole('button', { name: 'Copy diagnostics' }).click();
   await expect(about.getByRole('button', { name: 'Copied' })).toBeVisible();

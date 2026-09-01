@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -100,14 +100,95 @@ for (const file of files) {
   }
 }
 
+function exportTargets(value, targets = []) {
+  if (typeof value === 'string') targets.push(value);
+  else if (value && typeof value === 'object') for (const nested of Object.values(value)) exportTargets(nested, targets);
+  return targets;
+}
+
+function expandExportTarget(packageRoot, target) {
+  if (!target.includes('*')) return [resolve(packageRoot, target)];
+  const star = target.indexOf('*');
+  const prefix = target.slice(0, star);
+  const suffix = target.slice(star + 1);
+  const slash = prefix.lastIndexOf('/');
+  const searchRoot = resolve(packageRoot, slash >= 0 ? prefix.slice(0, slash) : '.');
+  return walk(searchRoot).filter(file => {
+    const candidate = `./${relative(packageRoot, file).split('\\').join('/')}`;
+    return candidate.startsWith(prefix) && candidate.endsWith(suffix);
+  });
+}
+
+function localImports(file) {
+  const text = readFileSync(file, 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/.*$/gm, '');
+  const imports = [];
+  const pattern = /(?:import|export)\s+(?:[^'";]+?\s+from\s+)?['"](\.[^'"]+)['"]|import\(\s*['"](\.[^'"]+)['"]\s*\)/g;
+  for (const match of text.matchAll(pattern)) imports.push(match[1] || match[2]);
+  return imports;
+}
+
+function resolveLocalImport(file, specifier) {
+  const candidate = resolve(dirname(file), specifier);
+  const declarationCandidate = candidate.endsWith('.js') ? `${candidate.slice(0, -3)}.d.ts` : undefined;
+  const candidates = extname(candidate)
+    ? [candidate, declarationCandidate].filter(Boolean)
+    : [candidate, `${candidate}.js`, `${candidate}.mjs`, `${candidate}.json`, `${candidate}.d.ts`, join(candidate, 'index.js')];
+  const found = candidates.find(path => {
+    try { return statSync(path).isFile(); } catch { return false; }
+  });
+  if (!found) throw new Error(`cannot resolve public local import ${specifier} from ${relative(root, file)}`);
+  return found;
+}
+
+function publicImportClosure(packageRoot, packageJson) {
+  const pending = exportTargets(packageJson.exports)
+    .filter(target => target.startsWith('./'))
+    .flatMap(target => expandExportTarget(packageRoot, target));
+  const visited = new Set();
+  while (pending.length > 0) {
+    const file = pending.pop();
+    if (visited.has(file)) continue;
+    visited.add(file);
+    if (!['.js', '.mjs', '.cjs', '.ts'].includes(extname(file))) continue;
+    for (const specifier of localImports(file)) pending.push(resolveLocalImport(file, specifier));
+  }
+  return visited;
+}
+
 for (const packagePath of ['packages/node-editor-protocol', 'packages/node-editor-reference-plugin']) {
-  for (const file of walk(join(root, packagePath))) {
+  const packageRoot = join(root, packagePath);
+  const packageJson = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'));
+  for (const file of publicImportClosure(packageRoot, packageJson)) {
     const relativeFile = relative(root, file);
-    if (relativeFile.endsWith('/package-lock.json')) continue;
     const text = readFileSync(file, 'utf8');
     for (const pattern of forbiddenNodeEditorAuthorityPatterns) {
       if (text.includes(pattern)) hits.push(`${relativeFile} crosses the Phase 1 public authority boundary with ${pattern}`);
     }
+  }
+}
+
+const referencePackageRoot = join(root, 'packages/node-editor-reference-plugin');
+const referencePackageJson = JSON.parse(readFileSync(join(referencePackageRoot, 'package.json'), 'utf8'));
+const declaredHost = referencePackageJson.lineage?.nodeEditorHost;
+const declaredManifest = referencePackageJson.lineage?.nodeEditorManifest;
+if (declaredHost !== 'src/host.js' || declaredManifest !== 'manifest.json') {
+  hits.push('reference plugin must declare canonical src/host.js and manifest.json assets');
+} else {
+  const hostPath = join(referencePackageRoot, declaredHost);
+  const publicClosure = publicImportClosure(referencePackageRoot, referencePackageJson);
+  if (publicClosure.has(hostPath) || exportTargets(referencePackageJson.exports).some(target => target === `./${declaredHost}`)) {
+    hits.push('reference host must not be exported or transitively imported by a public export');
+  }
+  const hostText = readFileSync(hostPath, 'utf8');
+  const allowedHostImports = new Set(['node:crypto', 'node:fs', 'node:http', 'node:url']);
+  const hostImports = [...hostText.matchAll(/(?:import|export)\s+(?:[^'";]+?\s+from\s+)?['"]([^'"]+)['"]/g)].map(match => match[1]);
+  for (const specifier of hostImports) {
+    if (!allowedHostImports.has(specifier)) hits.push(`reference host executable imports forbidden authority ${specifier}`);
+  }
+  for (const pattern of ['src/server', 'src/web', 'src/cli', 'better-sqlite3', 'node:sqlite', 'child_process', 'node:net', 'document.cookie', 'localStorage', 'sessionStorage']) {
+    if (hostText.includes(pattern)) hits.push(`reference host executable exceeds loopback-control authority with ${pattern}`);
   }
 }
 

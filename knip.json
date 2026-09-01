@@ -30,6 +30,7 @@
     "docs-site/.astro/**"
   ],
   "ignoreBinaries": ["gh", "ps"],
+  "ignoreDependencies": ["@mean-weasel/lineage-node-editor-protocol"],
   "ignoreIssues": {
     "src/server/assetCore.ts": ["exports"],
     "src/server/assetLedgerApi.ts": ["exports", "types"],

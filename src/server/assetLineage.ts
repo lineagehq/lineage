@@ -437,6 +437,22 @@ function withImplicitAttempt(physicalAttempts: LineageAttempt[], row: { asset_id
   return [...physicalAttempts, implicitAttempt(row, !physicalAttempts.some(attempt => attempt.is_current))];
 }
 
+export function getCurrentLineageAttemptIdentityInTransaction(database: DatabaseSync, project: string, nodeAssetId: string): { attemptId: string; checksumSha256: string } {
+  const physical = database.prepare(`
+    select id, checksum_sha256 from asset_attempts
+    where project_id = ? and node_asset_id = ? and is_current = 1
+  `).get(project, nodeAssetId) as { id?: string; checksum_sha256?: string } | undefined;
+  if (physical?.id) return { attemptId: physical.id, checksumSha256: physical.checksum_sha256 || '' };
+  const asset = database.prepare('select checksum_sha256 from assets where project_id = ? and id = ?').get(project, nodeAssetId) as { checksum_sha256?: string } | undefined;
+  if (!asset) throw new LineageError(`Unknown indexed asset: ${nodeAssetId}`, 404);
+  return { attemptId: `${project}:${nodeAssetId}:attempt:implicit`, checksumSha256: asset.checksum_sha256 || '' };
+}
+
+export function assertNodeEditorTargetInTransaction(database: DatabaseSync, project: string, rootAssetId: string, nodeAssetId: string): void {
+  assertWorkspaceRootAcceptsWrites(database, project, rootAssetId);
+  assertNodeInRoot(database, project, rootAssetId, nodeAssetId);
+}
+
 function assertNodeInRoot(database: DatabaseSync, project: string, root: string, node: string): void {
   assertCanonicalRoot(database, project, root);
   requireAsset(database, project, node);

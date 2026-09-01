@@ -11,7 +11,11 @@
       "default": "./src/index.js"
     }
   },
-  "files": ["README.md", "src"],
+  "files": ["README.md", "manifest.json", "src"],
+  "lineage": {
+    "nodeEditorHost": "src/host.js",
+    "nodeEditorManifest": "manifest.json"
+  },
   "scripts": {
     "check": "tsc --noEmit -p tsconfig.json",
     "test": "node --test test/*.test.mjs",

@@ -8,7 +8,7 @@ iteration, relationship, selection, and annotation in one local-first record:
 visual enough for humans to review and direct, and precise enough for agents to
 retrieve through the CLI and continue accurately.
 
-[See the landing page](https://mean-weasel.github.io/lineage/) ·
+[See the landing page](https://lineage.neonwatty.com/) ·
 [Install Lineage](#first-run) ·
 [Use the Codex plugin](#codex-plugin) ·
 [Develop locally](#local-development)

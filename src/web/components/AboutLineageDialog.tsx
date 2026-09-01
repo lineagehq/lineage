@@ -21,7 +21,7 @@ import { lineageReleaseInfo } from '../releaseInfo';
 import './AboutLineageDialog.css';
 
 const repositoryUrl = 'https://github.com/mean-weasel/lineage';
-const documentationUrl = 'https://mean-weasel.github.io/lineage/docs/';
+const documentationUrl = 'https://lineage.neonwatty.com/docs/';
 
 export function AboutLineageDialog({
   onClose,

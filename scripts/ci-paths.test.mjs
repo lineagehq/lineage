@@ -69,12 +69,30 @@ test('aggregate and path-specific CI all prove the combined Pages artifact', () 
   const docsJob = workflow.match(/\n\s{2}docs:[\s\S]*?(?=\n\s{2}app:)/)?.[0] || '';
   const pagesCheck = packageInfo.scripts['pages:check'];
 
-  assert.match(pagesCheck, /LINEAGE_DOCS_BASE=\/lineage\/docs\//);
-  assert.match(pagesCheck, /LINEAGE_WEB_BASE=\/lineage\//);
+  assert.match(pagesCheck, /LINEAGE_DOCS_BASE=\/docs\//);
+  assert.match(pagesCheck, /LINEAGE_DOCS_SITE=https:\/\/lineage\.neonwatty\.com/);
+  assert.match(pagesCheck, /LINEAGE_WEB_BASE=\//);
   assert.match(pagesCheck, /npm run pages:prepare/);
   assert.match(pagesCheck, /dist\/pages\/index\.html/);
   assert.match(pagesCheck, /dist\/pages\/docs\/index\.html/);
   assert.match(packageInfo.scripts.ci, /npm run pages:check/);
   assert.match(landingJob, /npm run pages:check/);
   assert.match(docsJob, /npm run pages:check/);
+});
+
+test('public site metadata names the custom domain as canonical', () => {
+  const landing = readFileSync(join(repoRoot, 'src', 'web', 'landing', 'index.html'), 'utf8');
+  const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8');
+  const docsConfig = readFileSync(join(repoRoot, 'docs-site', 'astro.config.mjs'), 'utf8');
+  const pagesWorkflow = readFileSync(join(repoRoot, '.github', 'workflows', 'pages.yml'), 'utf8');
+
+  assert.match(landing, /<link rel="canonical" href="https:\/\/lineage\.neonwatty\.com\/" \/>/);
+  assert.match(landing, /<meta property="og:url" content="https:\/\/lineage\.neonwatty\.com\/" \/>/);
+  assert.doesNotMatch(landing, /github\.io\/lineage/);
+  assert.match(readme, /https:\/\/lineage\.neonwatty\.com\//);
+  assert.match(docsConfig, /https:\/\/lineage\.neonwatty\.com/);
+  assert.match(pagesWorkflow, /LINEAGE_DOCS_BASE: \/docs\//);
+  assert.match(pagesWorkflow, /LINEAGE_DOCS_SITE: https:\/\/lineage\.neonwatty\.com/);
+  assert.match(pagesWorkflow, /LINEAGE_WEB_BASE: \//);
+  assert.doesNotMatch(pagesWorkflow, /steps\.pages\.outputs\.base_path/);
 });

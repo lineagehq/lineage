@@ -28,7 +28,7 @@
     "docs:build": "astro build --root docs-site",
     "docs:check": "npm run docs:validate && npm run docs:build",
     "pages:prepare": "node scripts/prepare-pages.mjs",
-    "pages:check": "npm run docs:validate && LINEAGE_DOCS_BASE=/lineage/docs/ npm run docs:build && LINEAGE_WEB_BASE=/lineage/ npm run build:web && npm run pages:prepare && test -f dist/pages/index.html && test -f dist/pages/docs/index.html && npm run build:web",
+    "pages:check": "npm run docs:validate && LINEAGE_DOCS_BASE=/docs/ LINEAGE_DOCS_SITE=https://lineage.neonwatty.com npm run docs:build && LINEAGE_WEB_BASE=/ npm run build:web && npm run pages:prepare && test -f dist/pages/index.html && test -f dist/pages/docs/index.html && npm run build:web",
     "build:provenance": "node scripts/write-runtime-build.mjs",
     "build:server": "esbuild src/server.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist/server.js --sourcemap",
     "build:cli": "esbuild src/cli/lineage.ts src/cli/lineage-channel.ts src/cli/lineage-dev.ts src/cli/lineage-preview.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outdir=dist/cli --sourcemap && esbuild scripts/managed-service.mjs --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist/cli/managed-service.js --sourcemap",

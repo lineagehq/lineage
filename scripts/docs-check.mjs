@@ -114,8 +114,8 @@ function resolveDocTarget(sourceFile, rawTarget, docsRoot) {
   const [pathPart, anchor] = rawTarget.split('#');
   let targetFile = sourceFile;
   if (pathPart) {
-    const clean = pathPart.startsWith('/lineage/docs/')
-      ? pathPart.slice('/lineage/docs/'.length)
+    const clean = pathPart.startsWith('/docs/')
+      ? pathPart.slice('/docs/'.length)
       : pathPart.startsWith('/') ? pathPart.slice(1) : pathPart;
     const base = pathPart.startsWith('/') ? join(docsRoot, clean) : resolve(dirname(sourceFile), clean);
     const candidates = extname(base) ? [base] : [`${base}.md`, join(base, 'index.md')];

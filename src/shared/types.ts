@@ -312,7 +312,7 @@ interface LineageSelection {
   asset_id: string; notes?: string; prompt?: string; prompt_status?: 'needs_prompt' | 'ready'; position: number; selected_at: string;
 }
 
-type LineageAttemptSource = 'generated_child' | 'initial' | 'reroll';
+type LineageAttemptSource = 'editor' | 'generated_child' | 'initial' | 'reroll';
 type LineageRerollActor = 'agent' | 'human' | 'system';
 type LineageRerollRequestStatus = 'cancelled' | 'pending' | 'resolved';
 

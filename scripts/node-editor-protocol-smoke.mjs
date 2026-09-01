@@ -20,16 +20,21 @@ function run(command, args, cwd = root) {
 function pack(packagePath) {
   const output = JSON.parse(run('npm', ['pack', packagePath, '--pack-destination', artifacts, '--json']));
   if (!output[0]?.filename) throw new Error(`npm pack did not report an artifact for ${packagePath}`);
-  return join(artifacts, output[0].filename);
+  return { path: join(artifacts, output[0].filename), files: output[0].files?.map(file => file.path) ?? [] };
 }
 
 try {
   const protocolTarball = pack(resolve(root, 'packages/node-editor-protocol'));
   const referenceTarball = pack(resolve(root, 'packages/node-editor-reference-plugin'));
+  for (const required of ['manifest.json', 'src/host.js']) {
+    if (!referenceTarball.files.includes(required)) throw new Error(`reference plugin pack omits ${required}`);
+  }
+  if (referenceTarball.files.some(file => file.startsWith('test/'))) throw new Error('reference plugin pack includes host tests');
   writeFileSync(join(consumer, 'package.json'), JSON.stringify({ name: 'clean-node-editor-consumer', private: true, type: 'module' }, null, 2));
-  run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', protocolTarball, referenceTarball, 'typescript@5.7.2'], consumer);
+  run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', protocolTarball.path, referenceTarball.path, 'typescript@5.7.2'], consumer);
   writeFileSync(join(consumer, 'smoke.mjs'), `
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { ProtocolError, validateManifest } from '@mean-weasel/lineage-node-editor-protocol';
 import { runConformance } from '@mean-weasel/lineage-node-editor-protocol/conformance';
 import { FakeNodeEditorHost } from '@mean-weasel/lineage-node-editor-protocol/fake-host';
@@ -41,8 +46,11 @@ const malformedOrigin = structuredClone(referenceManifest);
 malformedOrigin.nodeEditors[0].editor.origin = 'https://editor.test.invalid/path';
 assert.throws(() => validateManifest(malformedOrigin), error => error instanceof ProtocolError && error.code === 'invalid-wire-value');
 const flow = runReferenceFlow(new FakeNodeEditorHost({ document: { nodes: [] } }));
+const exactManifest = JSON.parse(readFileSync(new URL('./node_modules/@mean-weasel/lineage-node-editor-reference-plugin/manifest.json', import.meta.url), 'utf8'));
+assert.deepEqual(exactManifest, referenceManifest);
 assert.equal(flow.status.status, 'accepted');
 assert.equal(flow.closed.closed, true);
+await assert.rejects(import('@mean-weasel/lineage-node-editor-reference-plugin/src/host.js'), error => error?.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED');
 assert.equal(JSON.stringify(flow.trace).includes('process_'), false);
 console.log(JSON.stringify({ conformance: conformance.passed, flow: 'read-propose-status-close' }));
 `);
@@ -61,6 +69,9 @@ void [manifest, request, result, referenceManifest];
   if (installedReference.includes('../node-editor-protocol') || installedReference.includes('/src/')) {
     throw new Error('reference plugin contains sibling-source resolution');
   }
+  const installedManifest = readFileSync(join(consumer, 'node_modules/@mean-weasel/lineage-node-editor-reference-plugin/manifest.json'), 'utf8');
+  const sourceManifest = readFileSync(join(root, 'packages/node-editor-reference-plugin/manifest.json'), 'utf8');
+  if (installedManifest !== sourceManifest) throw new Error('packed manifest bytes differ from the declared exact manifest');
   console.log('node editor protocol clean-consumer smoke passed');
 } finally {
   rmSync(temporaryRoot, { recursive: true, force: true });

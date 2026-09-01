@@ -26,7 +26,7 @@ let activeLease: ProfileWriterLease | undefined;
 let activeProfileDir: string | undefined;
 let previousEnv: Partial<Record<(typeof managedEnvKeys)[number], string | undefined>> | undefined;
 
-export function useLineageTestProfile(databasePath: string): ResolvedLineageProfile {
+export function useLineageTestProfile(databasePath: string, options: { assetRoot?: string } = {}): ResolvedLineageProfile {
   resetLineageTestProfile();
   const resolvedDatabasePath = resolve(databasePath);
   mkdirSync(join(repoRoot, '.asset-scratch'), { recursive: true });
@@ -44,7 +44,7 @@ export function useLineageTestProfile(databasePath: string): ResolvedLineageProf
   const manifestPath = join(profileDir, 'profile.json');
   mkdirSync(profileDir, { recursive: true });
   const manifest: LineageProfileManifest = {
-    asset_root: repoRoot,
+    asset_root: options.assetRoot ? resolve(options.assetRoot) : repoRoot,
     database_path: resolvedDatabasePath,
     environment: 'development',
     expected_runtime: { channel: 'dev', code_fingerprint: 'd'.repeat(64), code_origin: 'checkout' },

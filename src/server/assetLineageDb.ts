@@ -106,7 +106,7 @@ export function lineageDb(): DatabaseSync {
       node_asset_id text not null references assets(id),
       asset_id text not null references assets(id),
       attempt_index integer not null check (attempt_index > 0),
-      source text not null check (source in ('initial', 'generated_child', 'reroll')),
+      source text not null check (source in ('initial', 'generated_child', 'reroll', 'editor')),
       prompt text,
       generation_job_id text,
       file_path text,
@@ -658,8 +658,105 @@ export function lineageDb(): DatabaseSync {
   ensureReviewStateValues(database);
   ensureAgentClaimScopeValues(database);
   ensureGenerationReceiptCheckValues(database);
+  ensureAssetAttemptSourceValues(database);
+  ensureNodeEditorTables(database);
   ensureLifecycleWriteGuards(database);
   return database;
+}
+
+function ensureAssetAttemptSourceValues(database: DatabaseSync): void {
+  const createSql = tableCreateSql(database, 'asset_attempts');
+  if (createSql.includes("'editor'")) return;
+  database.exec('PRAGMA foreign_keys = OFF; PRAGMA legacy_alter_table = ON; BEGIN IMMEDIATE');
+  try {
+    database.exec(`
+      alter table asset_attempts rename to asset_attempts_legacy_source;
+      create table asset_attempts (
+        id text primary key,
+        project_id text not null references projects(id),
+        node_asset_id text not null references assets(id),
+        asset_id text not null references assets(id),
+        attempt_index integer not null check (attempt_index > 0),
+        source text not null check (source in ('initial', 'generated_child', 'reroll', 'editor')),
+        prompt text,
+        generation_job_id text,
+        file_path text,
+        checksum_sha256 text,
+        created_at text not null,
+        promoted_at text,
+        is_current integer not null check (is_current in (0, 1)),
+        unique(project_id, node_asset_id, attempt_index),
+        unique(project_id, node_asset_id, asset_id, source)
+      );
+      insert into asset_attempts select * from asset_attempts_legacy_source;
+      drop table asset_attempts_legacy_source;
+      create unique index asset_attempts_one_current on asset_attempts(project_id, node_asset_id) where is_current = 1;
+      create index asset_attempts_node_created on asset_attempts(project_id, node_asset_id, created_at);
+    `);
+    const violations = database.prepare('pragma foreign_key_check').all();
+    if (violations.length > 0) throw new Error(`Asset attempt source migration failed foreign key check: ${JSON.stringify(violations)}`);
+    database.exec('COMMIT');
+  } catch (error) {
+    database.exec('ROLLBACK');
+    throw error;
+  } finally {
+    database.exec('PRAGMA legacy_alter_table = OFF; PRAGMA foreign_keys = ON');
+  }
+}
+
+function ensureNodeEditorTables(database: DatabaseSync): void {
+  database.exec(`
+    create table if not exists node_editor_attempt_provenance (
+      attempt_id text primary key references asset_attempts(id),
+      session_id text not null unique,
+      project_id text not null references projects(id),
+      node_asset_id text not null references assets(id),
+      plugin_id text not null,
+      contribution_id text not null,
+      plugin_package_name text not null,
+      plugin_package_version text not null,
+      protocol_major integer not null,
+      protocol_minor integer not null,
+      protocol_features_json text not null,
+      capabilities_json text not null,
+      package_archive_sha256 text not null,
+      manifest_sha256 text not null,
+      host_sha256 text not null,
+      base_attempt_id text not null,
+      base_checksum_sha256 text not null,
+      result_checksum_sha256 text not null,
+      result_mime_type text not null,
+      result_size_bytes integer not null,
+      edit_summary_json text not null,
+      accepted_at text not null
+    );
+    create table if not exists node_editor_terminal_results (
+      session_id text primary key,
+      project_id text not null references projects(id),
+      node_asset_id text not null references assets(id),
+      proposal_id text,
+      idempotency_key text,
+      outcome text not null check (outcome in ('accepted', 'stale', 'cancelled')),
+      code text,
+      asset_id text references assets(id),
+      attempt_id text references asset_attempts(id),
+      checksum_sha256 text,
+      result_json text not null,
+      created_at text not null,
+      unique(project_id, idempotency_key)
+    );
+    create index if not exists node_editor_terminal_project_created on node_editor_terminal_results(project_id, created_at);
+  `);
+  ensureColumn(database, 'node_editor_attempt_provenance', 'plugin_package_name', "text not null default ''");
+  ensureColumn(database, 'node_editor_attempt_provenance', 'plugin_package_version', "text not null default ''");
+  ensureColumn(database, 'node_editor_attempt_provenance', 'protocol_major', 'integer not null default 1');
+  ensureColumn(database, 'node_editor_attempt_provenance', 'protocol_minor', 'integer not null default 0');
+  ensureColumn(database, 'node_editor_attempt_provenance', 'protocol_features_json', "text not null default '[]'");
+  ensureColumn(database, 'node_editor_attempt_provenance', 'capabilities_json', "text not null default '[]'");
+  ensureColumn(database, 'node_editor_attempt_provenance', 'result_checksum_sha256', "text not null default ''");
+  ensureColumn(database, 'node_editor_attempt_provenance', 'result_mime_type', "text not null default ''");
+  ensureColumn(database, 'node_editor_attempt_provenance', 'result_size_bytes', 'integer not null default 0');
+  ensureColumn(database, 'node_editor_attempt_provenance', 'edit_summary_json', "text not null default '{}'");
 }
 
 function quoteIdentifier(value: string): string {

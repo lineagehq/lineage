@@ -52,6 +52,7 @@ import { assertLineageCodeOrigin, getLineageRuntimeInfo, normalizeRuntimeChannel
 import { assertResolvedRuntimeProfileEnvironment, assertRuntimeProfileSafety, assertUnselectedDatabaseIsUnbound, doctorLineageProfile } from './server/lineageProfiles';
 import { isManagedWriterRoutingError, registerManagedWriterRoute } from './server/managedWriterRouting';
 import { acquireProfileWriterLease } from './server/profileWriterLease';
+import { registerNodeEditorPluginRoutes } from './server/nodeEditorPlugins';
 import { executeDelegatedLineageMutation, lineageCliCanDelegateMutation } from './cli/lineageCli';
 import type { ResolvedLineageProfile } from './shared/lineageProfileTypes';
 import { OutputTargetResolutionError } from './shared/outputTargetTypes';
@@ -136,6 +137,7 @@ registerProjectWorkspaceRoutes(app, asyncRoute);
 app.get('/api/runtime', asyncRoute((_req, res) => {
   res.json({ ok: true, runtime: getLineageRuntimeInfo({ channel: runtimeChannel, code: startupCode }) });
 }));
+const nodeEditorPlugins = registerNodeEditorPluginRoutes(app, startupProfile);
 app.use('/api', projectLifecycleGate(projectFrom));
 app.get(
   '/api/assets',
@@ -576,7 +578,10 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
 
 const listenOrigin = `http://${host.includes(':') ? `[${host}]` : host}:${port}`;
 const server = app.listen(port, host, () => { console.log(`Lineage listening on ${listenOrigin}`); });
-const releaseWriterLease = () => writerLease?.release();
+const releaseWriterLease = () => {
+  void nodeEditorPlugins.close();
+  writerLease?.release();
+};
 process.once('exit', releaseWriterLease);
 process.once('SIGINT', () => { releaseWriterLease(); process.exit(130); });
 process.once('SIGTERM', () => { releaseWriterLease(); process.exit(143); });

@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "pluginId": "reference.editor",
+  "packageName": "@mean-weasel/lineage-node-editor-reference-plugin",
+  "packageVersion": "0.1.0",
+  "displayName": "Reference editor",
+  "protocol": [
+    {
+      "major": 1,
+      "minMinor": 0,
+      "maxMinor": 2,
+      "features": ["document-read", "save-proposal", "proposal-status", "proposal-cancel", "terminal-close"],
+      "requiredFeatures": ["document-read", "save-proposal", "terminal-close"]
+    }
+  ],
+  "nodeEditors": [
+    {
+      "kind": "nodeEditor",
+      "id": "reference.editor",
+      "displayName": "Reference editor",
+      "accepts": {
+        "mimeTypes": ["image/png", "image/jpeg", "image/webp", "image/svg+xml"],
+        "maxBytes": 10000000
+      },
+      "editor": {
+        "entrypoint": "editor/index.html",
+        "origin": "https://editor.test.invalid"
+      },
+      "minimumViewport": {
+        "width": 640,
+        "height": 480
+      },
+      "requestedCapabilities": ["document.read", "proposal.create", "proposal.status", "proposal.cancel", "session.close"],
+      "health": {
+        "kind": "process-heartbeat",
+        "intervalMs": 5000,
+        "timeoutMs": 1000
+      }
+    }
+  ]
+}

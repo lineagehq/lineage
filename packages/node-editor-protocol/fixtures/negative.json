@@ -1,0 +1,53 @@
+[
+  { "name": "unknown message discriminator", "validator": "proxyRequest", "expectedCode": "invalid-wire-value", "value": { "type": "database.query", "requestId": "request-1" } },
+  { "name": "unknown result discriminator", "validator": "proxyResult", "expectedCode": "invalid-wire-value", "value": { "type": "filesystem.result", "requestId": "request-1" } },
+  {
+    "name": "unknown requested capability", "validator": "manifest", "expectedCode": "invalid-wire-value",
+    "value": {
+      "schemaVersion": 1, "pluginId": "bad.editor", "packageName": "@mean-weasel/bad-editor", "packageVersion": "1.0.0", "displayName": "Bad",
+      "protocol": [{ "major": 1, "minMinor": 0, "maxMinor": 1, "features": ["document-read"], "requiredFeatures": ["document-read"] }],
+      "nodeEditors": [{ "kind": "nodeEditor", "id": "bad.editor", "displayName": "Bad", "accepts": { "mimeTypes": ["image/png"], "maxBytes": 1000 }, "editor": { "entrypoint": "editor/index.html", "origin": "https://editor.test.invalid" }, "minimumViewport": { "width": 640, "height": 480 }, "requestedCapabilities": ["database.query"], "health": { "kind": "process-heartbeat", "intervalMs": 5000, "timeoutMs": 1000 } }]
+    }
+  },
+  {
+    "name": "arbitrary contribution kind", "validator": "manifest", "expectedCode": "invalid-wire-value",
+    "value": {
+      "schemaVersion": 1, "pluginId": "bad.editor", "packageName": "@mean-weasel/bad-editor", "packageVersion": "1.0.0", "displayName": "Bad",
+      "protocol": [{ "major": 1, "minMinor": 0, "maxMinor": 1, "features": ["document-read"], "requiredFeatures": [] }],
+      "nodeEditors": [{ "kind": "arbitrary", "id": "bad.editor", "displayName": "Bad", "accepts": { "mimeTypes": ["image/png"], "maxBytes": 1000 }, "editor": { "entrypoint": "editor/index.html", "origin": "https://editor.test.invalid" }, "minimumViewport": { "width": 640, "height": 480 }, "requestedCapabilities": ["document.read"], "health": { "kind": "process-heartbeat", "intervalMs": 5000, "timeoutMs": 1000 } }]
+    }
+  },
+  { "name": "unknown required feature", "validator": "negotiation", "expectedCode": "invalid-wire-value", "value": { "host": [{ "major": 1, "minMinor": 0, "maxMinor": 1, "features": ["document-read"], "requiredFeatures": [] }], "plugin": [{ "major": 1, "minMinor": 0, "maxMinor": 1, "features": ["document-read", "arbitrary-host-access"], "requiredFeatures": ["arbitrary-host-access"] }] } },
+  { "name": "malformed minor range", "validator": "negotiation", "expectedCode": "malformed-advertisement", "value": { "host": [{ "major": 1, "minMinor": 2, "maxMinor": 1, "features": ["document-read"], "requiredFeatures": [] }], "plugin": [{ "major": 1, "minMinor": 0, "maxMinor": 1, "features": ["document-read"], "requiredFeatures": [] }] } },
+  { "name": "duplicate major advertisement", "validator": "negotiation", "expectedCode": "duplicate-advertisement", "value": { "host": [{ "major": 1, "minMinor": 0, "maxMinor": 1, "features": ["document-read"], "requiredFeatures": [] }, { "major": 1, "minMinor": 2, "maxMinor": 3, "features": ["document-read"], "requiredFeatures": [] }], "plugin": [{ "major": 1, "minMinor": 0, "maxMinor": 3, "features": ["document-read"], "requiredFeatures": [] }] } },
+  { "name": "no major overlap", "validator": "negotiation", "expectedCode": "incompatible-protocol", "value": { "host": [{ "major": 1, "minMinor": 0, "maxMinor": 1, "features": ["document-read"], "requiredFeatures": [] }], "plugin": [{ "major": 2, "minMinor": 0, "maxMinor": 1, "features": ["document-read"], "requiredFeatures": [] }] } },
+  { "name": "no minor overlap", "validator": "negotiation", "expectedCode": "incompatible-protocol", "value": { "host": [{ "major": 1, "minMinor": 0, "maxMinor": 1, "features": ["document-read"], "requiredFeatures": [] }], "plugin": [{ "major": 1, "minMinor": 2, "maxMinor": 3, "features": ["document-read"], "requiredFeatures": [] }] } },
+  { "name": "noncanonical package version", "validator": "manifest", "expectedCode": "invalid-wire-value", "value": { "schemaVersion": 1, "pluginId": "bad.editor", "packageName": "@mean-weasel/bad-editor", "packageVersion": "v1.0", "displayName": "Bad", "protocol": [{ "major": 1, "minMinor": 0, "maxMinor": 1, "features": ["document-read"], "requiredFeatures": [] }], "nodeEditors": [{ "kind": "nodeEditor", "id": "bad.editor", "displayName": "Bad", "accepts": { "mimeTypes": ["image/png"], "maxBytes": 1000 }, "editor": { "entrypoint": "editor/index.html", "origin": "https://editor.test.invalid" }, "minimumViewport": { "width": 640, "height": 480 }, "requestedCapabilities": ["document.read"], "health": { "kind": "process-heartbeat", "intervalMs": 5000, "timeoutMs": 1000 } }] } },
+  { "name": "filesystem path authority", "validator": "proxyRequest", "expectedCode": "invalid-wire-value", "value": { "type": "document.read", "requestId": "request-1", "path": "/private/project.sqlite" } },
+  { "name": "URL credential extension", "validator": "browserMessage", "expectedCode": "invalid-wire-value", "value": { "type": "editor.ready", "sessionId": "session-1", "url": "https://editor.invalid/?credential=secret" } },
+  { "name": "read-only scope denies proposal create", "validator": "fakeHostScenario", "expectedCode": "capability-scope-denied", "value": { "scenario": "scope-create" } },
+  { "name": "read-only scope denies proposal status", "validator": "fakeHostScenario", "expectedCode": "capability-scope-denied", "value": { "scenario": "scope-status" } },
+  { "name": "read-only scope denies proposal cancel", "validator": "fakeHostScenario", "expectedCode": "capability-scope-denied", "value": { "scenario": "scope-cancel" } },
+  { "name": "read-only scope denies session close", "validator": "fakeHostScenario", "expectedCode": "capability-scope-denied", "value": { "scenario": "scope-close" } },
+  { "name": "wrong plugin binding", "validator": "fakeHostScenario", "expectedCode": "plugin-binding-mismatch", "value": { "scenario": "plugin-binding" } },
+  { "name": "wrong process binding", "validator": "fakeHostScenario", "expectedCode": "process-binding-mismatch", "value": { "scenario": "process-binding" } },
+  { "name": "wrong session binding", "validator": "fakeHostScenario", "expectedCode": "session-binding-mismatch", "value": { "scenario": "session-binding" } },
+  { "name": "wrong process origin", "validator": "fakeHostScenario", "expectedCode": "origin-binding-mismatch", "value": { "scenario": "origin-binding" } },
+  { "name": "wrong process source", "validator": "fakeHostScenario", "expectedCode": "source-binding-mismatch", "value": { "scenario": "source-binding" } },
+  { "name": "bootstrap replay", "validator": "fakeHostScenario", "expectedCode": "capability-replayed", "value": { "scenario": "replay" } },
+  { "name": "process expiry", "validator": "fakeHostScenario", "expectedCode": "capability-expired", "value": { "scenario": "expiry" } },
+  { "name": "process revocation", "validator": "fakeHostScenario", "expectedCode": "capability-revoked", "value": { "scenario": "revocation" } },
+  { "name": "duplicate request ID", "validator": "fakeHostScenario", "expectedCode": "duplicate-request", "value": { "scenario": "duplicate-request" } },
+  { "name": "embedded credentials are redacted before duplicate rejection", "validator": "fakeHostScenario", "expectedCode": "duplicate-request", "value": { "scenario": "embedded-redaction" } },
+  { "name": "document resource ceiling", "validator": "fakeHostScenario", "expectedCode": "resource-limit", "value": { "scenario": "resource" } },
+  { "name": "stale proposal base", "validator": "fakeHostScenario", "expectedCode": "stale-base", "value": { "scenario": "stale" } },
+  { "name": "duplicate proposal", "validator": "fakeHostScenario", "expectedCode": "duplicate-proposal", "value": { "scenario": "duplicate" } },
+  { "name": "terminal proposal transition", "validator": "fakeHostScenario", "expectedCode": "proposal-terminal", "value": { "scenario": "proposal-terminal" } },
+  { "name": "request after session close", "validator": "fakeHostScenario", "expectedCode": "session-terminal", "value": { "scenario": "session-terminal" } },
+  { "name": "host acceptance after session close", "validator": "fakeHostScenario", "expectedCode": "session-terminal", "value": { "scenario": "host-accept-after-close" } },
+  { "name": "editor origin rejects non-HTTP scheme", "validator": "manifestOrigin", "expectedCode": "invalid-wire-value", "value": { "origin": "ftp://editor.test.invalid" } },
+  { "name": "editor origin rejects userinfo", "validator": "manifestOrigin", "expectedCode": "invalid-wire-value", "value": { "origin": "https://user@editor.test.invalid" } },
+  { "name": "editor origin rejects path", "validator": "manifestOrigin", "expectedCode": "invalid-wire-value", "value": { "origin": "https://editor.test.invalid/path" } },
+  { "name": "editor origin rejects query", "validator": "manifestOrigin", "expectedCode": "invalid-wire-value", "value": { "origin": "https://editor.test.invalid?mode=edit" } },
+  { "name": "editor origin rejects fragment", "validator": "manifestOrigin", "expectedCode": "invalid-wire-value", "value": { "origin": "https://editor.test.invalid#editor" } }
+]

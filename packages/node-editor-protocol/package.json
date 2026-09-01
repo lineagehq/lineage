@@ -1,0 +1,56 @@
+{
+  "name": "@mean-weasel/lineage-node-editor-protocol",
+  "version": "0.1.0",
+  "description": "Schema-first protocol and conformance kit for Lineage node editor plugins",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./conformance": {
+      "types": "./src/conformance.d.ts",
+      "default": "./src/conformance.js"
+    },
+    "./fake-host": {
+      "types": "./src/fake-host.d.ts",
+      "default": "./src/fake-host.js"
+    },
+    "./schemas/protocol.schema.json": "./schemas/protocol.schema.json",
+    "./fixtures/*": "./fixtures/*"
+  },
+  "files": [
+    "README.md",
+    "fixtures",
+    "generated",
+    "schemas",
+    "src"
+  ],
+  "scripts": {
+    "generate": "node scripts/generate-types.mjs",
+    "generate:check": "node scripts/generate-types.mjs --check",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test test/*.test.mjs",
+    "conformance": "node scripts/run-conformance.mjs",
+    "pack:smoke": "npm pack --dry-run --json >/dev/null",
+    "audit": "npm audit --audit-level=moderate"
+  },
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "semver": "^7.8.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/semver": "^7.7.0",
+    "json-schema-to-typescript": "^16.0.0",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=22.22.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -29,7 +29,22 @@ const filesToScan = [
   'scripts',
   'plugins/lineage-codex-plugin',
   'packages/lineage-plugin-installer',
+  'packages/node-editor-protocol',
+  'packages/node-editor-reference-plugin',
   '.agents/plugins/marketplace.json',
+];
+
+const forbiddenNodeEditorAuthorityPatterns = [
+  'src/server',
+  'src/web',
+  'src/cli',
+  'better-sqlite3',
+  'child_process',
+  'node:net',
+  'node:http',
+  'document.cookie',
+  'localStorage',
+  'sessionStorage',
 ];
 
 const privatePatterns = [
@@ -81,6 +96,17 @@ for (const file of files) {
   for (const pattern of forbidden) {
     if (text.includes(pattern)) {
       hits.push(`${relative(root, file)} contains forbidden public-readiness pattern`);
+    }
+  }
+}
+
+for (const packagePath of ['packages/node-editor-protocol', 'packages/node-editor-reference-plugin']) {
+  for (const file of walk(join(root, packagePath))) {
+    const relativeFile = relative(root, file);
+    if (relativeFile.endsWith('/package-lock.json')) continue;
+    const text = readFileSync(file, 'utf8');
+    for (const pattern of forbiddenNodeEditorAuthorityPatterns) {
+      if (text.includes(pattern)) hits.push(`${relativeFile} crosses the Phase 1 public authority boundary with ${pattern}`);
     }
   }
 }

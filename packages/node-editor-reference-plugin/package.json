@@ -1,0 +1,31 @@
+{
+  "name": "@mean-weasel/lineage-node-editor-reference-plugin",
+  "version": "0.1.0",
+  "description": "Minimal public-contract reference implementation for the Lineage node editor protocol",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    }
+  },
+  "files": ["README.md", "src"],
+  "scripts": {
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test test/*.test.mjs",
+    "pack:smoke": "npm pack --dry-run --json >/dev/null",
+    "audit": "npm audit --audit-level=moderate"
+  },
+  "peerDependencies": {
+    "@mean-weasel/lineage-node-editor-protocol": "^0.1.0"
+  },
+  "devDependencies": {
+    "@mean-weasel/lineage-node-editor-protocol": "file:../node-editor-protocol",
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": { "node": ">=22.22.0" },
+  "publishConfig": { "access": "public" }
+}

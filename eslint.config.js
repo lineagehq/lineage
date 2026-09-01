@@ -47,6 +47,8 @@ export default tseslint.config(
       "src/server/**/*.ts",
       "src/cli/**/*.ts",
       "scripts/**/*.{js,mjs,cjs,ts}",
+      "packages/node-editor-protocol/**/*.{js,mjs,cjs,ts}",
+      "packages/node-editor-reference-plugin/**/*.{js,mjs,cjs,ts}",
       "*.config.{js,mjs,cjs,ts}"
     ],
     languageOptions: {

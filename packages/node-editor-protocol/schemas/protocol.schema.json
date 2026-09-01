@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lineage.neonwatty.com/schemas/node-editor-protocol/1/protocol.schema.json",
+  "title": "Lineage Node Editor Protocol",
+  "description": "Authoritative wire definitions for protocol major 1.",
+  "oneOf": [
+    { "$ref": "#/$defs/PluginManifest" },
+    { "$ref": "#/$defs/InstallEnvelope" },
+    { "$ref": "#/$defs/InstallReceipt" },
+    { "$ref": "#/$defs/BootstrapEnvelope" },
+    { "$ref": "#/$defs/BootstrapExchangeResult" },
+    { "$ref": "#/$defs/SessionDescriptor" },
+    { "$ref": "#/$defs/BrowserMessage" },
+    { "$ref": "#/$defs/ProxyRequest" },
+    { "$ref": "#/$defs/ProxyResult" }
+  ],
+  "$defs": {
+    "CanonicalSemver": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "Identifier": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$", "minLength": 1, "maxLength": 128 },
+    "OpaqueToken": { "type": "string", "pattern": "^[A-Za-z0-9_-]{16,256}$" },
+    "Digest": { "type": "string", "pattern": "^sha256-[A-Za-z0-9+/]{43}=$" },
+    "Feature": { "enum": ["document-read", "save-proposal", "proposal-status", "proposal-cancel", "terminal-close"] },
+    "Capability": { "enum": ["document.read", "proposal.create", "proposal.status", "proposal.cancel", "session.close"] },
+    "ProtocolAdvertisement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["major", "minMinor", "maxMinor", "features", "requiredFeatures"],
+      "properties": {
+        "major": { "type": "integer", "minimum": 1 },
+        "minMinor": { "type": "integer", "minimum": 0 },
+        "maxMinor": { "type": "integer", "minimum": 0 },
+        "features": { "type": "array", "items": { "$ref": "#/$defs/Feature" }, "uniqueItems": true },
+        "requiredFeatures": { "type": "array", "items": { "$ref": "#/$defs/Feature" }, "uniqueItems": true }
+      }
+    },
+    "ProtocolSupport": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/ProtocolAdvertisement" }
+    },
+    "ArtifactEligibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mimeTypes", "maxBytes"],
+      "properties": {
+        "mimeTypes": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["image/png", "image/jpeg", "image/webp", "image/svg+xml"] } },
+        "maxBytes": { "type": "integer", "minimum": 1, "maximum": 1073741824 }
+      }
+    },
+    "EditorLaunch": {
+      "type": "object", "additionalProperties": false,
+      "required": ["entrypoint", "origin"],
+      "properties": {
+        "entrypoint": { "type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9][A-Za-z0-9._/-]*\\.html$" },
+        "origin": { "type": "string", "format": "http-origin" }
+      }
+    },
+    "MinimumViewport": {
+      "type": "object", "additionalProperties": false,
+      "required": ["width", "height"],
+      "properties": { "width": { "type": "integer", "minimum": 320, "maximum": 8192 }, "height": { "type": "integer", "minimum": 240, "maximum": 8192 } }
+    },
+    "HealthDeclaration": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "intervalMs", "timeoutMs"],
+      "properties": {
+        "kind": { "const": "process-heartbeat" },
+        "intervalMs": { "type": "integer", "minimum": 1000, "maximum": 60000 },
+        "timeoutMs": { "type": "integer", "minimum": 100, "maximum": 30000 }
+      }
+    },
+    "NodeEditorContribution": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "id", "displayName", "accepts", "editor", "minimumViewport", "requestedCapabilities", "health"],
+      "properties": {
+        "kind": { "const": "nodeEditor" },
+        "id": { "$ref": "#/$defs/Identifier" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "accepts": { "$ref": "#/$defs/ArtifactEligibility" },
+        "editor": { "$ref": "#/$defs/EditorLaunch" },
+        "minimumViewport": { "$ref": "#/$defs/MinimumViewport" },
+        "requestedCapabilities": { "type": "array", "items": { "$ref": "#/$defs/Capability" }, "uniqueItems": true },
+        "health": { "$ref": "#/$defs/HealthDeclaration" }
+      }
+    },
+    "PluginManifest": {
+      "title": "PluginManifest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "pluginId", "packageName", "packageVersion", "displayName", "protocol", "nodeEditors"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "pluginId": { "$ref": "#/$defs/Identifier" },
+        "packageName": { "type": "string", "pattern": "^@[a-z0-9._-]+/[a-z0-9._-]+$" },
+        "packageVersion": { "$ref": "#/$defs/CanonicalSemver" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "protocol": { "$ref": "#/$defs/ProtocolSupport" },
+        "nodeEditors": { "type": "array", "minItems": 1, "maxItems": 1, "items": { "$ref": "#/$defs/NodeEditorContribution" } }
+      }
+    },
+    "InstallEnvelope": {
+      "title": "InstallEnvelope",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "expectedIntegrity", "manifest"],
+      "properties": {
+        "type": { "const": "install.request" },
+        "expectedIntegrity": { "$ref": "#/$defs/Digest" },
+        "manifest": { "$ref": "#/$defs/PluginManifest" }
+      }
+    },
+    "InstallReceipt": {
+      "title": "InstallReceipt",
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "accepted", "pluginId", "packageVersion"],
+          "properties": { "type": { "const": "install.receipt" }, "accepted": { "const": true }, "pluginId": { "$ref": "#/$defs/Identifier" }, "packageVersion": { "$ref": "#/$defs/CanonicalSemver" } }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "accepted", "code"],
+          "properties": { "type": { "const": "install.receipt" }, "accepted": { "const": false }, "code": { "enum": ["integrity-mismatch", "invalid-manifest", "incompatible-protocol", "authority-denied"] } }
+        }
+      ]
+    },
+    "BootstrapEnvelope": {
+      "title": "BootstrapEnvelope",
+      "type": "object", "additionalProperties": false,
+      "required": ["type", "pluginId", "processId", "sessionId", "bootstrapCredential", "expiresAt"],
+      "properties": {
+        "type": { "const": "bootstrap" }, "pluginId": { "$ref": "#/$defs/Identifier" }, "processId": { "$ref": "#/$defs/Identifier" }, "sessionId": { "$ref": "#/$defs/Identifier" }, "bootstrapCredential": { "$ref": "#/$defs/OpaqueToken" }, "expiresAt": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "BootstrapExchangeResult": {
+      "title": "BootstrapExchangeResult",
+      "type": "object", "additionalProperties": false,
+      "required": ["type", "processCapability", "uiLaunchCredential", "processBinding", "uiBinding", "expiresAt"],
+      "properties": { "type": { "const": "bootstrap.accepted" }, "processCapability": { "$ref": "#/$defs/OpaqueToken" }, "uiLaunchCredential": { "$ref": "#/$defs/OpaqueToken" }, "processBinding": { "$ref": "#/$defs/ProcessBinding" }, "uiBinding": { "$ref": "#/$defs/UiBinding" }, "expiresAt": { "type": "integer", "minimum": 0 } }
+    },
+    "ProcessBinding": {
+      "title": "ProcessBinding", "type": "object", "additionalProperties": false,
+      "required": ["pluginId", "processId", "sessionId", "origin", "source"],
+      "properties": { "pluginId": { "$ref": "#/$defs/Identifier" }, "processId": { "$ref": "#/$defs/Identifier" }, "sessionId": { "$ref": "#/$defs/Identifier" }, "origin": { "type": "string", "format": "uri" }, "source": { "$ref": "#/$defs/Identifier" } }
+    },
+    "UiBinding": {
+      "title": "UiBinding", "type": "object", "additionalProperties": false,
+      "required": ["pluginId", "sessionId", "origin", "source"],
+      "properties": { "pluginId": { "$ref": "#/$defs/Identifier" }, "sessionId": { "$ref": "#/$defs/Identifier" }, "origin": { "type": "string", "format": "uri" }, "source": { "$ref": "#/$defs/Identifier" } }
+    },
+    "SessionDescriptor": {
+      "title": "SessionDescriptor",
+      "type": "object", "additionalProperties": false,
+      "required": ["type", "sessionId", "pluginId", "origin", "protocol", "features", "capabilities"],
+      "properties": {
+        "type": { "const": "session.descriptor" }, "sessionId": { "$ref": "#/$defs/Identifier" }, "pluginId": { "$ref": "#/$defs/Identifier" }, "origin": { "type": "string", "format": "uri" },
+        "protocol": { "type": "object", "additionalProperties": false, "required": ["major", "minor"], "properties": { "major": { "type": "integer", "minimum": 1 }, "minor": { "type": "integer", "minimum": 0 } } },
+        "features": { "type": "array", "items": { "$ref": "#/$defs/Feature" }, "uniqueItems": true }, "capabilities": { "type": "array", "items": { "$ref": "#/$defs/Capability" }, "uniqueItems": true }
+      }
+    },
+    "BrowserMessage": {
+      "title": "BrowserMessage",
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["type", "sessionId"], "properties": { "type": { "const": "editor.ready" }, "sessionId": { "$ref": "#/$defs/Identifier" } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "session"], "properties": { "type": { "const": "host.session" }, "session": { "$ref": "#/$defs/SessionDescriptor" } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "reason"], "properties": { "type": { "const": "host.close" }, "reason": { "enum": ["accepted", "cancelled", "revoked", "error"] } } },
+        { "type": "object", "additionalProperties": false, "required": ["type"], "properties": { "type": { "const": "editor.close-ack" } } }
+      ]
+    },
+    "ProposalHeader": {
+      "type": "object", "additionalProperties": false,
+      "required": ["proposalId", "idempotencyKey", "baseRevision", "baseChecksum"],
+      "properties": { "proposalId": { "$ref": "#/$defs/Identifier" }, "idempotencyKey": { "$ref": "#/$defs/Identifier" }, "baseRevision": { "type": "integer", "minimum": 0 }, "baseChecksum": { "$ref": "#/$defs/Digest" } }
+    },
+    "ProxyRequest": {
+      "title": "ProxyRequest",
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["type", "requestId", "binding"], "properties": { "type": { "const": "document.read" }, "requestId": { "$ref": "#/$defs/Identifier" }, "binding": { "$ref": "#/$defs/ProcessBinding" } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "requestId", "binding", "header", "document"], "properties": { "type": { "const": "proposal.create" }, "requestId": { "$ref": "#/$defs/Identifier" }, "binding": { "$ref": "#/$defs/ProcessBinding" }, "header": { "$ref": "#/$defs/ProposalHeader" }, "document": { "type": "object", "additionalProperties": true } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "requestId", "binding", "proposalId"], "properties": { "type": { "const": "proposal.status" }, "requestId": { "$ref": "#/$defs/Identifier" }, "binding": { "$ref": "#/$defs/ProcessBinding" }, "proposalId": { "$ref": "#/$defs/Identifier" } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "requestId", "binding", "proposalId"], "properties": { "type": { "const": "proposal.cancel" }, "requestId": { "$ref": "#/$defs/Identifier" }, "binding": { "$ref": "#/$defs/ProcessBinding" }, "proposalId": { "$ref": "#/$defs/Identifier" } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "requestId", "binding"], "properties": { "type": { "const": "session.close" }, "requestId": { "$ref": "#/$defs/Identifier" }, "binding": { "$ref": "#/$defs/ProcessBinding" } } }
+      ]
+    },
+    "ProxyResult": {
+      "title": "ProxyResult",
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["type", "requestId", "revision", "checksum", "document"], "properties": { "type": { "const": "document.result" }, "requestId": { "$ref": "#/$defs/Identifier" }, "revision": { "type": "integer", "minimum": 0 }, "checksum": { "$ref": "#/$defs/Digest" }, "document": { "type": "object", "additionalProperties": true } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "requestId", "proposalId", "status"], "properties": { "type": { "const": "proposal.result" }, "requestId": { "$ref": "#/$defs/Identifier" }, "proposalId": { "$ref": "#/$defs/Identifier" }, "status": { "enum": ["pending", "accepted", "rejected", "cancelled"] } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "requestId", "closed"], "properties": { "type": { "const": "session.closed" }, "requestId": { "$ref": "#/$defs/Identifier" }, "closed": { "const": true } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "requestId", "code"], "properties": { "type": { "const": "protocol.error" }, "requestId": { "$ref": "#/$defs/Identifier" }, "code": { "enum": ["invalid-message", "authority-denied", "capability-scope-denied", "plugin-binding-mismatch", "process-binding-mismatch", "session-binding-mismatch", "origin-binding-mismatch", "source-binding-mismatch", "capability-expired", "capability-replayed", "capability-revoked", "resource-limit", "duplicate-request", "stale-base", "duplicate-proposal", "unknown-proposal", "proposal-terminal", "session-terminal"] } } }
+      ]
+    }
+  }
+}

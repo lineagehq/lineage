@@ -1,4 +1,5 @@
 import type express from 'express';
+import { rateLimit } from 'express-rate-limit';
 import type { ResolvedLineageProfile } from '../../shared/lineageProfileTypes';
 import type { NodeEditorPluginConfig } from '../../shared/nodeEditorPluginTypes';
 import { loadNodeEditorPluginConfig } from './config';
@@ -51,6 +52,15 @@ export function registerNodeEditorPluginRoutes(
     cookieTtlMs: positiveEnvironmentMilliseconds('LINEAGE_NODE_EDITOR_COOKIE_TTL_MS'),
   });
   const sessionService = new NodeEditorSessionService({ profile, registry, supervisor, authority });
+  const sessionRateLimit = rateLimit({
+    windowMs: 60_000,
+    limit: 120,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+    handler: (_req, res) => {
+      res.status(429).json({ error: 'node_editor_rate_limited', message: 'Too many node editor requests; try again later.' });
+    },
+  });
 
   const cookies = (req: express.Request) => Object.fromEntries(String(req.headers.cookie || '').split(';').map(part => part.trim().split('=', 2)).filter(parts => parts.length === 2));
   const authorizeBrowser = (req: express.Request) => sessionService.authorizeBrowser(req.params.sessionId, cookies(req).lineage_node_editor_session || '', actualControllerOrigin(req));
@@ -84,7 +94,7 @@ export function registerNodeEditorPluginRoutes(
   app.get('/api/node-editor-plugins/:contributionId/status', (req, res) => {
     res.json({ ok: true, status: supervisor.status(req.params.contributionId) });
   });
-  app.post('/api/node-editor-plugins/:contributionId/sessions', (req, res) => {
+  app.post('/api/node-editor-plugins/:contributionId/sessions', sessionRateLimit, (req, res) => {
     let controllerOrigin: string;
     try { controllerOrigin = actualControllerOrigin(req); }
     catch (error) { res.status('status' in Object(error) ? Number((error as { status: number }).status) : 400).json({ error: 'session_create_failed', message: error instanceof Error ? error.message : String(error) }); return; }
@@ -99,7 +109,7 @@ export function registerNodeEditorPluginRoutes(
       res.status('status' in Object(error) ? Number((error as { status: number }).status) : 409).json({ error: 'session_create_failed', message: error instanceof Error ? error.message : String(error) });
     });
   });
-  app.post('/api/node-editor-plugins/sessions/:sessionId/exchange', (req, res) => {
+  app.post('/api/node-editor-plugins/sessions/:sessionId/exchange', sessionRateLimit, (req, res) => {
     try {
       const exchanged = sessionService.exchange({
         sessionId: req.params.sessionId,
@@ -117,27 +127,27 @@ export function registerNodeEditorPluginRoutes(
       res.status('status' in Object(error) ? Number((error as { status: number }).status) : 401).json({ error: 'launch_exchange_failed', message: error instanceof Error ? error.message : String(error) });
     }
   });
-  app.get('/api/node-editor-plugins/sessions/:sessionId/document', (req, res) => {
+  app.get('/api/node-editor-plugins/sessions/:sessionId/document', sessionRateLimit, (req, res) => {
     try { authorizeBrowser(req); res.json({ ok: true, document: sessionService.browserDocument(req.params.sessionId) }); }
     catch (error) { res.status('status' in Object(error) ? Number((error as { status: number }).status) : 401).json({ error: 'browser_document_failed', message: error instanceof Error ? error.message : String(error) }); }
   });
-  app.post('/api/node-editor-plugins/sessions/:sessionId/proposals', (req, res) => {
+  app.post('/api/node-editor-plugins/sessions/:sessionId/proposals', sessionRateLimit, (req, res) => {
     try { authorizeBrowser(req); res.status(201).json({ ok: true, proposal: sessionService.browserCreateProposal(req.params.sessionId, req.body) }); }
     catch (error) { res.status('status' in Object(error) ? Number((error as { status: number }).status) : 400).json({ error: 'browser_proposal_failed', message: error instanceof Error ? error.message : String(error) }); }
   });
-  app.get('/api/node-editor-plugins/sessions/:sessionId/status', (req, res) => {
+  app.get('/api/node-editor-plugins/sessions/:sessionId/status', sessionRateLimit, (req, res) => {
     try { authorizeBrowser(req); res.json({ ok: true, ...sessionService.browserStatus(req.params.sessionId) }); }
     catch (error) { res.status('status' in Object(error) ? Number((error as { status: number }).status) : 401).json({ error: 'browser_status_failed', message: error instanceof Error ? error.message : String(error) }); }
   });
-  app.post('/api/node-editor-plugins/sessions/:sessionId/cancel', (req, res) => {
+  app.post('/api/node-editor-plugins/sessions/:sessionId/cancel', sessionRateLimit, (req, res) => {
     try { authorizeBrowser(req); res.json({ ok: true, outcome: sessionService.browserCancel(req.params.sessionId) }); }
     catch (error) { res.status('status' in Object(error) ? Number((error as { status: number }).status) : 401).json({ error: 'browser_cancel_failed', message: error instanceof Error ? error.message : String(error) }); }
   });
-  app.post('/api/node-editor-plugins/sessions/:sessionId/close', (req, res) => {
+  app.post('/api/node-editor-plugins/sessions/:sessionId/close', sessionRateLimit, (req, res) => {
     try { authorizeBrowser(req); res.json({ ok: true, ...sessionService.browserClose(req.params.sessionId) }); }
     catch (error) { res.status('status' in Object(error) ? Number((error as { status: number }).status) : 401).json({ error: 'browser_close_failed', message: error instanceof Error ? error.message : String(error) }); }
   });
-  app.post('/api/node-editor-plugins/sessions/:sessionId/protocol', (req, res) => {
+  app.post('/api/node-editor-plugins/sessions/:sessionId/protocol', sessionRateLimit, (req, res) => {
     try {
       const authorization = String(req.headers.authorization || '');
       const capability = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
@@ -146,7 +156,7 @@ export function registerNodeEditorPluginRoutes(
       res.status('status' in Object(error) ? Number((error as { status: number }).status) : 400).json({ error: 'protocol_request_failed', message: error instanceof Error ? error.message : String(error) });
     }
   });
-  app.put('/api/node-editor-plugins/sessions/:sessionId/proposals/:proposalId/content', (req, res) => {
+  app.put('/api/node-editor-plugins/sessions/:sessionId/proposals/:proposalId/content', sessionRateLimit, (req, res) => {
     try {
       const requestCookies = cookies(req);
       const authorization = String(req.headers.authorization || '');

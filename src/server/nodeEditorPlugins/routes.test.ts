@@ -100,6 +100,19 @@ describe('node editor plugin routes', () => {
     }
   });
 
+  it('rate limits session authority attempts before repeated authorization work', async () => {
+    const base = await serve(enabledConfig());
+    const responses = await Promise.all(Array.from({ length: 121 }, () => (
+      fetch(`${base}/api/node-editor-plugins/sessions/missing/document`)
+    )));
+
+    expect(responses.filter(response => response.status === 404)).toHaveLength(120);
+    expect(responses.filter(response => response.status === 429)).toHaveLength(1);
+    const limited = responses.find(response => response.status === 429);
+    expect(limited?.headers.get('ratelimit')).toBeTruthy();
+    expect(await limited?.json()).toMatchObject({ error: 'node_editor_rate_limited' });
+  });
+
   it('runs the real host through a configured lineage-dev.localhost origin and preserves exact launch binding', async () => {
     const context = createNodeEditorTestContext('routes-session');
     contexts.push(context);

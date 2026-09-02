@@ -155,6 +155,12 @@ describe('node editor plugin routes', () => {
     const mismatchedOriginHeader = await fetch(`${controllerBase}/api/node-editor-plugins/sessions/${created.launch.sessionId}/document`, { headers: { cookie: browserCookie, origin: base } });
     expect(mismatchedOriginHeader.status).toBe(403);
     const document = await (await fetch(`${controllerBase}/api/node-editor-plugins/sessions/${created.launch.sessionId}/document`, { headers: { cookie: browserCookie } })).json() as { document: { baseAttemptId: string; baseChecksumSha256: string } };
+    const content = await fetch(`${controllerBase}/api/node-editor-plugins/sessions/${created.launch.sessionId}/document/content`, { headers: { cookie: browserCookie } });
+    expect(content.status).toBe(200);
+    expect(content.headers.get('cache-control')).toBe('no-store');
+    expect(content.headers.get('content-type')).toBe('image/png');
+    expect(content.headers.get('x-lineage-content-sha256')).toBe(sha256(Buffer.from(await content.clone().arrayBuffer())));
+    expect(Buffer.from(await content.arrayBuffer())).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]));
     const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
     const proposalId = 'proposal-browser-route';
     const proposal = await fetch(`${controllerBase}/api/node-editor-plugins/sessions/${created.launch.sessionId}/proposals`, {

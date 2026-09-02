@@ -1,5 +1,5 @@
 import { Readable } from 'node:stream';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { lineageDb } from '../assetLineageDb';
@@ -41,6 +41,25 @@ describe('node editor session service', () => {
     const authority = context.service.processAuthorityForTest(launch.sessionId);
     const status = processRequest(context.service, launch.sessionId, 'proposal.status', { proposalId: 'proposal-1' });
     expect(context.service.handleProcessRequest(launch.sessionId, authority.processCapability, status.request)).toMatchObject({ type: 'protocol.error', code: 'authority-denied' });
+  });
+
+  it('serves bounded verified source bytes only while document content is negotiated', async () => {
+    const context = createNodeEditorTestContext('service-source-content');
+    contexts.push(context);
+    const launch = await context.service.create({ contributionId: 'reference.editor', project: 'test-project', rootAssetId: 'root-asset', nodeAssetId: 'node-asset' });
+    expect(context.service.browserDocumentContent(launch.sessionId)).toMatchObject({
+      attemptId: 'test-project:node-asset:attempt:implicit', checksumSha256: sha256(tinyPng), mimeType: 'image/png', sizeBytes: tinyPng.length, bytes: tinyPng,
+    });
+    writeFileSync(join(context.profile.asset_root, 'node-asset.png'), Buffer.from('tampered'));
+    expect(() => context.service.browserDocumentContent(launch.sessionId)).toThrow(/size|checksum/);
+
+    const legacyManifest = structuredClone(positiveFixtures[0].value) as PluginManifest;
+    legacyManifest.protocol[0].maxMinor = 2;
+    legacyManifest.protocol[0].features = legacyManifest.protocol[0].features.filter(feature => feature !== 'document-content');
+    const legacy = createNodeEditorTestContext('service-source-legacy', undefined, { manifest: legacyManifest });
+    contexts.push(legacy);
+    const legacyLaunch = await legacy.service.create({ contributionId: 'reference.editor', project: 'test-project', rootAssetId: 'root-asset', nodeAssetId: 'node-asset' });
+    expect(() => legacy.service.browserDocumentContent(legacyLaunch.sessionId)).toThrow(/outside the negotiated session scope/);
   });
 
   it('persists deterministic pre-materialization stale outcome', async () => {
@@ -125,7 +144,7 @@ describe('node editor session service', () => {
     contexts.push(restricted);
     const restrictedLaunch = await restricted.service.create({ contributionId: 'reference.editor', project: 'test-project', rootAssetId: 'root-asset', nodeAssetId: 'node-asset' });
     const denied = processRequest(restricted.service, restrictedLaunch.sessionId, 'proposal.create', {
-      header: { proposalId: 'proposal-denied', idempotencyKey: 'idem-denied', baseRevision: 0, baseChecksum: `sha256-${Buffer.from('2'.repeat(64), 'hex').toString('base64')}` },
+      header: { proposalId: 'proposal-denied', idempotencyKey: 'idem-denied', baseRevision: 0, baseChecksum: `sha256-${Buffer.from(sha256(tinyPng), 'hex').toString('base64')}` },
       document: { baseAttemptId: 'test-project:node-asset:attempt:implicit', mimeType: 'image/png', sizeBytes: tinyPng.length, checksumSha256: sha256(tinyPng), editSummary: 'Denied' },
     });
     expect(restricted.service.handleProcessRequest(restrictedLaunch.sessionId, denied.capability, denied.request)).toMatchObject({ type: 'protocol.error', code: 'capability-scope-denied' });

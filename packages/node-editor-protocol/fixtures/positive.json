@@ -8,7 +8,7 @@
       "packageName": "@mean-weasel/lineage-node-editor-reference-plugin",
       "packageVersion": "0.1.0",
       "displayName": "Reference editor",
-      "protocol": [{ "major": 1, "minMinor": 0, "maxMinor": 2, "features": ["document-read", "save-proposal", "proposal-status", "proposal-cancel", "terminal-close"], "requiredFeatures": ["document-read", "save-proposal", "terminal-close"] }],
+      "protocol": [{ "major": 1, "minMinor": 0, "maxMinor": 3, "features": ["document-read", "document-content", "save-proposal", "proposal-status", "proposal-cancel", "terminal-close"], "requiredFeatures": ["document-read", "save-proposal", "terminal-close"] }],
       "nodeEditors": [{
         "kind": "nodeEditor", "id": "reference.editor", "displayName": "Reference editor",
         "accepts": { "mimeTypes": ["image/png", "image/jpeg", "image/webp", "image/svg+xml"], "maxBytes": 10000000 },
@@ -50,5 +50,8 @@
   { "name": "read request", "validator": "proxyRequest", "value": { "type": "document.read", "requestId": "request-1", "binding": { "pluginId": "reference.editor", "processId": "process-1", "sessionId": "session-1", "origin": "https://process.test.invalid", "source": "process" } } },
   { "name": "close request", "validator": "proxyRequest", "value": { "type": "session.close", "requestId": "request-close", "binding": { "pluginId": "reference.editor", "processId": "process-1", "sessionId": "session-1", "origin": "https://process.test.invalid", "source": "process" } } },
   { "name": "close result", "validator": "proxyResult", "value": { "type": "session.closed", "requestId": "request-close", "closed": true } },
-  { "name": "editor ready", "validator": "browserMessage", "value": { "type": "editor.ready", "sessionId": "session-1" } }
+  { "name": "editor ready", "validator": "browserMessage", "value": { "type": "editor.ready", "sessionId": "session-1" } },
+  { "name": "canonical browser connect", "validator": "browserMessage", "value": { "type": "lineage.node-editor.connect", "channelBinding": "binding_1234567890" } },
+  { "name": "canonical binary document transfer", "validator": "browserMessage", "value": { "type": "lineage.node-editor.document", "mimeType": "image/svg+xml", "sizeBytes": 64, "checksumSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "payload": {} } },
+  { "name": "canonical binary proposal", "validator": "browserMessage", "value": { "type": "lineage.node-editor.save", "summary": "Adjusted reference SVG", "mimeType": "image/svg+xml", "payload": {} } }
 ]

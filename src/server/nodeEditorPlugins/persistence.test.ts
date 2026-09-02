@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { useLineageTestProfile } from '../../test/lineageTestProfile';
 import { repoRoot } from '../assetCore';
 import { lineageDb } from '../assetLineageDb';
-import { acceptNodeEditorResult, getNodeEditorTerminal, type NodeEditorAcceptanceInput } from './persistence';
+import { acceptNodeEditorResult, getNodeEditorTerminal, readNodeEditorBaseContent, type NodeEditorAcceptanceInput } from './persistence';
 import { collectNodeEditorOrphans, materializeNodeEditorContent, type NodeEditorFaultPoint } from './materialization';
 import { createNodeEditorTestContext, forbiddenStateSnapshot, sha256, tinyPng } from './testSupport';
 
@@ -26,7 +26,7 @@ function acceptance(name: string, inject?: (point: NodeEditorFaultPoint) => void
     input: {
       sessionId: `session-${name}`, proposalId: `proposal-${name}`, idempotencyKey: `idem-${name}`,
       project: 'test-project', rootAssetId: 'root-asset', nodeAssetId: 'node-asset',
-      baseAttemptId: 'test-project:node-asset:attempt:implicit', baseChecksumSha256: '2'.repeat(64),
+      baseAttemptId: 'test-project:node-asset:attempt:implicit', baseChecksumSha256: sha256(tinyPng),
       pluginId: 'reference.editor', contributionId: 'reference.editor', installation: context.config.installations[0], content, inject,
       pluginPackageName: '@mean-weasel/reference-editor', pluginPackageVersion: '1.2.3',
       protocol: { major: 1, minor: 2, features: ['document-read', 'save-proposal'], capabilities: ['document.read', 'proposal.create'] },
@@ -36,6 +36,22 @@ function acceptance(name: string, inject?: (point: NodeEditorFaultPoint) => void
 }
 
 describe('node editor persistence', () => {
+  it('resolves only the authorized current asset and verifies immutable size and checksum metadata', () => {
+    const context = createNodeEditorTestContext('source-content');
+    contexts.push(context);
+    const expected = { attemptId: 'test-project:node-asset:attempt:implicit', checksumSha256: sha256(tinyPng), maxBytes: 1024 };
+    expect(readNodeEditorBaseContent(context.profile.asset_root, 'test-project', 'root-asset', 'node-asset', expected)).toMatchObject({
+      attemptId: expected.attemptId,
+      checksumSha256: expected.checksumSha256,
+      mimeType: 'image/png',
+      sizeBytes: tinyPng.length,
+      bytes: tinyPng,
+    });
+    writeFileSync(join(context.profile.asset_root, 'node-asset.png'), Buffer.from('tampered'));
+    expect(() => readNodeEditorBaseContent(context.profile.asset_root, 'test-project', 'root-asset', 'node-asset', expected)).toThrow(/size|checksum/);
+    expect(() => readNodeEditorBaseContent(context.profile.asset_root, 'test-project', 'root-asset', 'root-asset', expected)).toThrow();
+  });
+
   it('atomically accepts, preserves review notes, records provenance, and returns terminal retry', () => {
     const { input } = acceptance('accepted');
     const forbiddenBefore = forbiddenStateSnapshot();

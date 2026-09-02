@@ -53,10 +53,26 @@ describe('node editor plugin registry', () => {
       pluginId: 'reference.editor',
       packageName: '@mean-weasel/lineage-node-editor-reference-plugin',
       contribution: { id: 'reference.editor' },
-      protocol: { major: 1, minor: 2 },
+      protocol: { major: 1, minor: 3, features: expect.arrayContaining(['document-content']) },
     });
     expect(JSON.stringify(summary)).not.toContain('packageArchivePath');
     expect(JSON.stringify(summary)).not.toContain('command');
+  });
+
+  it.each([0, 1, 2])('retains deterministic protocol 1.%s compatibility without document content', minor => {
+    const { config, record } = fixture();
+    const manifestPath = join(record.extractedRoot, 'manifest.json');
+    const legacy = structuredClone(referenceManifest);
+    legacy.protocol[0].maxMinor = minor;
+    legacy.protocol[0].features = legacy.protocol[0].features.filter(feature => feature !== 'document-content');
+    const manifestBytes = `${JSON.stringify(legacy, null, 2)}\n`;
+    writeFileSync(manifestPath, manifestBytes);
+    record.manifestSha256 = sha256(manifestBytes);
+    expect(publicNodeEditorPluginSummary(new NodeEditorPluginRegistry(config).get(record.contributionId)).protocol).toEqual({
+      major: 1,
+      minor,
+      features: legacy.protocol[0].features.slice().sort(),
+    });
   });
 
   it('rejects package archive corruption', () => {

@@ -8,14 +8,16 @@
   body { margin: 0; min-height: 100vh; display: grid; place-items: center; }
   main { width: min(36rem, calc(100% - 2rem)); display: grid; gap: 1rem; }
   textarea { min-height: 7rem; padding: .75rem; font: inherit; }
+  #svg-source { min-height: 12rem; font-family: ui-monospace, monospace; font-size: .8rem; }
   .actions { display: flex; gap: .75rem; }
   button { padding: .7rem 1rem; font: inherit; }
 </style>
 <main>
   <h1>Reference editor</h1>
   <p id="status" role="status">Connecting securely to Lineage…</p>
+  <label>SVG source<textarea id="svg-source" readonly aria-label="SVG source"></textarea></label>
   <label>Edit summary<textarea id="summary">Reference browser edit</textarea></label>
-  <div class="actions"><button id="save" disabled>Save edit</button><button id="cancel" disabled>Cancel</button></div>
+  <div class="actions"><button id="apply" disabled>Apply reference edit</button><button id="save" disabled>Save edit</button><button id="cancel" disabled>Cancel</button></div>
 </main>
 <script>
   let channel;
@@ -23,11 +25,18 @@
   const fragment = new URLSearchParams(location.hash.slice(1));
   const parentOrigin = fragment.get('lineageParentOrigin');
   const channelBinding = fragment.get('lineageChannelBinding');
+  const negotiatedProtocol = fragment.get('lineageProtocol');
+  const canonical = /^1\.(?:[3-9]|[1-9][0-9]+)$/.test(negotiatedProtocol || '');
+  const messages = canonical
+    ? { connect: 'lineage.node-editor.connect', connected: 'lineage.node-editor.connected', document: 'lineage.node-editor.document', dirty: 'lineage.node-editor.dirty', save: 'lineage.node-editor.save', cancel: 'lineage.node-editor.cancel', state: 'lineage.node-editor.state' }
+    : { connect: 'reference.editor.connect', connected: 'lineage.editor.ack', document: '', dirty: 'reference.editor.dirty', save: 'reference.editor.save', cancel: 'reference.editor.cancel', state: 'lineage.editor.state' };
   const maxConnectAttempts = 20;
   const connectRetryMilliseconds = 100;
   let connectAttempts = 0;
   let retryTimer;
-  const maximumPayloadBytes = 1024 * 1024;
+  const maximumPayloadBytes = 10_000_000;
+  let documentBytes;
+  let documentMimeType;
 
   function validParentOrigin(value) {
     try { return Boolean(value) && new URL(value).origin === value; } catch { return false; }
@@ -53,35 +62,68 @@
     const candidate = pair.port1;
     candidates.add(candidate);
     candidate.onmessage = message => {
-      if (!channel && message.data?.type === 'lineage.editor.ack' && message.data.channelBinding === channelBinding) {
+      if (!channel && message.data?.type === messages.connected && message.data.channelBinding === channelBinding) {
         channel = candidate;
         clearTimeout(retryTimer);
         closeCandidates(candidate);
         document.querySelector('#status').textContent = message.data.message;
-        document.querySelectorAll('button').forEach(button => { button.disabled = false; });
+        document.querySelector('#cancel').disabled = false;
+        if (!canonical) document.querySelector('#save').disabled = false;
         return;
       }
-      if (channel === candidate && message.data?.type === 'lineage.editor.state') {
+      if (channel === candidate && message.data?.type === messages.state) {
         document.querySelector('#status').textContent = message.data.message;
       }
+      if (channel === candidate && canonical && message.data?.type === messages.document) void receiveDocument(message.data);
     };
-    parent.postMessage({ type: 'reference.editor.connect', channelBinding }, parentOrigin, [pair.port2]);
+    parent.postMessage({ type: messages.connect, channelBinding }, parentOrigin, [pair.port2]);
     retryTimer = setTimeout(connect, connectRetryMilliseconds);
   }
 
   if (validParentOrigin(parentOrigin) && channelBinding && /^[A-Za-z0-9_-]{16,128}$/.test(channelBinding)) {
     connect();
   }
-  function editPayload() {
+  function legacyEditPayload() {
     const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
     if (bytes.byteLength > maximumPayloadBytes) throw new Error('Reference edit exceeds its transfer limit.');
     return bytes;
   }
-  document.querySelector('#summary').addEventListener('input', () => channel?.postMessage({ type: 'reference.editor.dirty', dirty: true }));
-  document.querySelector('#save').addEventListener('click', () => {
-    const bytes = editPayload();
-    channel?.postMessage({ type: 'reference.editor.save', summary: document.querySelector('#summary').value, mimeType: 'image/png', payload: bytes.buffer }, [bytes.buffer]);
+  async function receiveDocument(message) {
+    const keys = Object.keys(message).sort().join(',');
+    if (keys !== 'checksumSha256,mimeType,payload,sizeBytes,type' || !(message.payload instanceof ArrayBuffer)
+      || message.payload.byteLength !== message.sizeBytes || message.sizeBytes < 1 || message.sizeBytes > maximumPayloadBytes
+      || !/^[a-f0-9]{64}$/.test(message.checksumSha256)) throw new Error('Invalid Lineage document transfer.');
+    const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', message.payload))].map(value => value.toString(16).padStart(2, '0')).join('');
+    if (digest !== message.checksumSha256) throw new Error('Lineage document transfer checksum mismatch.');
+    documentBytes = new Uint8Array(message.payload);
+    documentMimeType = message.mimeType;
+    if (documentMimeType === 'image/svg+xml') {
+      document.querySelector('#svg-source').value = new TextDecoder().decode(documentBytes);
+      document.querySelector('#apply').disabled = false;
+    } else {
+      document.querySelector('#svg-source').value = `Loaded ${documentMimeType} (${documentBytes.byteLength} bytes)`;
+    }
+    document.querySelector('#save').disabled = false;
+    document.querySelector('#status').textContent = 'Current immutable asset loaded.';
+  }
+  function markDirty() { channel?.postMessage({ type: messages.dirty, dirty: true }); }
+  document.querySelector('#summary').addEventListener('input', markDirty);
+  document.querySelector('#apply').addEventListener('click', () => {
+    const parsed = new DOMParser().parseFromString(document.querySelector('#svg-source').value, 'image/svg+xml');
+    if (parsed.querySelector('parsererror') || parsed.documentElement.localName !== 'svg') throw new Error('Current SVG is invalid.');
+    parsed.documentElement.setAttribute('data-lineage-reference-edit', 'true');
+    const label = parsed.querySelector('text');
+    if (label) label.textContent = `${label.textContent || ''} · edited`;
+    const serialized = new XMLSerializer().serializeToString(parsed.documentElement);
+    document.querySelector('#svg-source').value = serialized;
+    documentBytes = new TextEncoder().encode(serialized);
+    markDirty();
   });
-  document.querySelector('#cancel').addEventListener('click', () => channel?.postMessage({ type: 'reference.editor.cancel' }));
+  document.querySelector('#save').addEventListener('click', () => {
+    const bytes = canonical ? documentBytes : legacyEditPayload();
+    if (!bytes || bytes.byteLength > maximumPayloadBytes) throw new Error('Reference edit exceeds its transfer limit.');
+    channel?.postMessage({ type: messages.save, summary: document.querySelector('#summary').value, mimeType: canonical ? documentMimeType : 'image/png', payload: bytes.buffer }, [bytes.buffer]);
+  });
+  document.querySelector('#cancel').addEventListener('click', () => channel?.postMessage({ type: messages.cancel }));
 </script>
 </html>

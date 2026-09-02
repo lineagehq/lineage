@@ -10,6 +10,7 @@ import { NodeEditorSessionAuthority } from './sessionAuthority';
 import { collectNodeEditorOrphans } from './materialization';
 import { registeredNodeEditorChecksums } from './persistence';
 import type { ProxyRequest } from '../../../packages/node-editor-protocol/generated/protocol';
+import { Readable } from 'node:stream';
 
 function actualControllerOrigin(req: express.Request): string {
   const host = req.get('host');
@@ -130,6 +131,20 @@ export function registerNodeEditorPluginRoutes(
   app.get('/api/node-editor-plugins/sessions/:sessionId/document', sessionRateLimit, (req, res) => {
     try { authorizeBrowser(req); res.json({ ok: true, document: sessionService.browserDocument(req.params.sessionId) }); }
     catch (error) { res.status('status' in Object(error) ? Number((error as { status: number }).status) : 401).json({ error: 'browser_document_failed', message: error instanceof Error ? error.message : String(error) }); }
+  });
+  app.get('/api/node-editor-plugins/sessions/:sessionId/document/content', sessionRateLimit, (req, res) => {
+    try {
+      authorizeBrowser(req);
+      const content = sessionService.browserDocumentContent(req.params.sessionId);
+      res.status(200);
+      res.setHeader('Content-Type', content.mimeType);
+      res.setHeader('Content-Length', String(content.sizeBytes));
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-Lineage-Content-Sha256', content.checksumSha256);
+      Readable.from(content.bytes).pipe(res);
+    } catch (error) {
+      res.status('status' in Object(error) ? Number((error as { status: number }).status) : 401).json({ error: 'browser_document_content_failed', message: error instanceof Error ? error.message : String(error) });
+    }
   });
   app.post('/api/node-editor-plugins/sessions/:sessionId/proposals', sessionRateLimit, (req, res) => {
     try { authorizeBrowser(req); res.status(201).json({ ok: true, proposal: sessionService.browserCreateProposal(req.params.sessionId, req.body) }); }

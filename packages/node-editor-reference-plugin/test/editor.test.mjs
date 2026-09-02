@@ -2,19 +2,32 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-test('editor is self-contained and activates only an exactly acknowledged bounded-retry MessageChannel', async () => {
+test('editor is self-contained, negotiates canonical 1.3 messages, and edits transferred SVG bytes', async () => {
   const html = await readFile(new URL('../editor/index.html', import.meta.url), 'utf8');
+  const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.meta.url), 'utf8'));
+  const runtimeLimitSource = html.match(/const maximumPayloadBytes = ([\d_]+);/)?.[1];
+  assert.ok(runtimeLimitSource, 'editor declares a static maximumPayloadBytes constant');
+  const runtimeLimit = Number(runtimeLimitSource.replaceAll('_', ''));
+  const manifestLimit = manifest.nodeEditors[0].accepts.maxBytes;
+  assert.equal(manifestLimit, 10_000_000);
+  assert.equal(runtimeLimit, manifestLimit);
   assert.match(html, /new MessageChannel\(\)/);
   assert.match(html, /maxConnectAttempts = 20/);
   assert.match(html, /connectAttempts >= maxConnectAttempts/);
-  assert.match(html, /parent\.postMessage\(\{ type: 'reference\.editor\.connect', channelBinding \}, parentOrigin/);
-  assert.match(html, /message\.data\?\.type === 'lineage\.editor\.ack' && message\.data\.channelBinding === channelBinding/);
+  assert.match(html, /lineage\.node-editor\.connect/);
+  assert.match(html, /lineage\.node-editor\.connected/);
+  assert.match(html, /lineage\.node-editor\.document/);
+  assert.match(html, /parent\.postMessage\(\{ type: messages\.connect, channelBinding \}, parentOrigin/);
+  assert.match(html, /message\.data\?\.type === messages\.connected && message\.data\.channelBinding === channelBinding/);
   assert.match(html, /if \(!channel/);
   assert.match(html, /reference\.editor\.dirty/);
-  assert.match(html, /reference\.editor\.save[^\n]+mimeType: 'image\/png'[^\n]+payload: bytes\.buffer/);
+  assert.match(html, /reference\.editor\.save/);
+  assert.match(html, /data-lineage-reference-edit/);
+  assert.match(html, /new XMLSerializer/);
+  assert.match(html, /crypto\.subtle\.digest\('SHA-256', message\.payload\)/);
+  assert.match(html, /type: messages\.save[^\n]+payload: bytes\.buffer/);
   assert.match(html, /\[bytes\.buffer\]/);
-  assert.match(html, /maximumPayloadBytes = 1024 \* 1024/);
-  assert.doesNotMatch(html, /localStorage|sessionStorage|document\.cookie|launchCredential|processCapability|controlCredential/);
+  assert.doesNotMatch(html, /localStorage|sessionStorage|document\.cookie|launchCredential|processCapability|controlCredential|document\/content/);
   assert.doesNotMatch(html, /postMessage\([^\n]+['"]\*['"]/);
   assert.doesNotMatch(html, /<script[^>]+src=|<link[^>]+href=/);
 });

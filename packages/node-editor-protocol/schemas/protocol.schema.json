@@ -22,7 +22,8 @@
     "Identifier": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$", "minLength": 1, "maxLength": 128 },
     "OpaqueToken": { "type": "string", "pattern": "^[A-Za-z0-9_-]{16,256}$" },
     "Digest": { "type": "string", "pattern": "^sha256-[A-Za-z0-9+/]{43}=$" },
-    "Feature": { "enum": ["document-read", "save-proposal", "proposal-status", "proposal-cancel", "terminal-close"] },
+    "HexDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "Feature": { "enum": ["document-read", "document-content", "save-proposal", "proposal-status", "proposal-cancel", "terminal-close"] },
     "Capability": { "enum": ["document.read", "proposal.create", "proposal.status", "proposal.cancel", "session.close"] },
     "ProtocolAdvertisement": {
       "type": "object",
@@ -167,7 +168,14 @@
         { "type": "object", "additionalProperties": false, "required": ["type", "sessionId"], "properties": { "type": { "const": "editor.ready" }, "sessionId": { "$ref": "#/$defs/Identifier" } } },
         { "type": "object", "additionalProperties": false, "required": ["type", "session"], "properties": { "type": { "const": "host.session" }, "session": { "$ref": "#/$defs/SessionDescriptor" } } },
         { "type": "object", "additionalProperties": false, "required": ["type", "reason"], "properties": { "type": { "const": "host.close" }, "reason": { "enum": ["accepted", "cancelled", "revoked", "error"] } } },
-        { "type": "object", "additionalProperties": false, "required": ["type"], "properties": { "type": { "const": "editor.close-ack" } } }
+        { "type": "object", "additionalProperties": false, "required": ["type"], "properties": { "type": { "const": "editor.close-ack" } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "channelBinding"], "properties": { "type": { "const": "lineage.node-editor.connect" }, "channelBinding": { "$ref": "#/$defs/OpaqueToken" } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "channelBinding", "message"], "properties": { "type": { "const": "lineage.node-editor.connected" }, "channelBinding": { "$ref": "#/$defs/OpaqueToken" }, "message": { "type": "string", "minLength": 1, "maxLength": 2048 } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "mimeType", "sizeBytes", "checksumSha256", "payload"], "properties": { "type": { "const": "lineage.node-editor.document" }, "mimeType": { "enum": ["image/png", "image/jpeg", "image/webp", "image/svg+xml"] }, "sizeBytes": { "type": "integer", "minimum": 1, "maximum": 16777216 }, "checksumSha256": { "$ref": "#/$defs/HexDigest" }, "payload": {} } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "dirty"], "properties": { "type": { "const": "lineage.node-editor.dirty" }, "dirty": { "const": true } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "summary", "mimeType", "payload"], "properties": { "type": { "const": "lineage.node-editor.save" }, "summary": { "type": "string", "minLength": 1, "maxLength": 2048 }, "mimeType": { "enum": ["image/png", "image/jpeg", "image/webp", "image/svg+xml"] }, "payload": {} } },
+        { "type": "object", "additionalProperties": false, "required": ["type"], "properties": { "type": { "const": "lineage.node-editor.cancel" } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "message"], "properties": { "type": { "const": "lineage.node-editor.state" }, "message": { "type": "string", "minLength": 1, "maxLength": 2048 } } }
       ]
     },
     "ProposalHeader": {

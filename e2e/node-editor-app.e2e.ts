@@ -22,12 +22,15 @@ async function openEditor(page: Page, request: APIRequestContext, project: strin
   const frame = page.frameLocator('iframe[title*="editor"]');
   await expect(dialog.locator('iframe')).toHaveAttribute('sandbox', 'allow-scripts');
   await expect(frame.getByRole('button', { name: 'Save edit' })).toBeEnabled();
+  await expect(frame.getByLabel('SVG source')).toHaveValue(/<svg/);
   return { dialog, frame, seeded, target };
 }
 
 test('real packed editor transfers its bytes, saves, and exposes visible sanitized history provenance', async ({ page, request }) => {
   const { dialog, frame, seeded, target } = await openEditor(page, request, 'node-editor-save');
   await frame.getByLabel('Edit summary').fill('Packed browser payload');
+  await frame.getByRole('button', { name: 'Apply reference edit' }).click();
+  await expect(frame.getByLabel('SVG source')).toHaveValue(/data-lineage-reference-edit="true"/);
   await frame.getByRole('button', { name: 'Save edit' }).click();
   await expect(dialog.getByRole('status')).toContainText('accepted', { timeout: 15_000 });
   await dialog.getByRole('button', { name: 'Done' }).click();

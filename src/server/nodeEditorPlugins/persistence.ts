@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { basename } from 'node:path';
+import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from 'node:fs';
+import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { NodeEditorTerminalOutcome, NodeEditorVerifiedInstallationRecord } from '../../shared/nodeEditorPluginTypes';
 import { assertNodeEditorTargetInTransaction, getCurrentLineageAttemptIdentityInTransaction } from '../assetLineage';
 import { lineageDb, nowIso, type DatabaseSync } from '../assetLineageDb';
@@ -38,24 +39,94 @@ export function getNodeEditorTerminal(sessionId: string): NodeEditorTerminalOutc
   }
 }
 
-export function getNodeEditorBase(project: string, rootAssetId: string, nodeAssetId: string): { attemptId: string; checksumSha256: string; mimeType: string; sizeBytes: number } {
+export interface NodeEditorBase {
+  attemptId: string;
+  checksumSha256: string;
+  mimeType: string;
+  sizeBytes: number;
+  filePath?: string;
+}
+
+export interface NodeEditorBaseContent extends Omit<NodeEditorBase, 'filePath'> {
+  bytes: Buffer;
+}
+
+export function getNodeEditorBase(project: string, rootAssetId: string, nodeAssetId: string): NodeEditorBase {
   const database = lineageDb();
   try {
     assertNodeEditorTargetInTransaction(database, project, rootAssetId, nodeAssetId);
     const identity = getCurrentLineageAttemptIdentityInTransaction(database, project, nodeAssetId);
     const row = database.prepare(`
       select coalesce(current_asset.content_type, node.content_type, 'application/octet-stream') mime_type,
-             coalesce(current_asset.size_bytes, node.size_bytes, 0) size_bytes
+             coalesce(current_asset.size_bytes, node.size_bytes, 0) size_bytes,
+             coalesce(current_attempt.file_path, current_asset.local_path, node.local_path) file_path
       from assets node
       left join asset_attempts current_attempt on current_attempt.project_id = node.project_id
         and current_attempt.node_asset_id = node.id and current_attempt.is_current = 1
       left join assets current_asset on current_asset.project_id = current_attempt.project_id
         and current_asset.id = current_attempt.asset_id
       where node.project_id = ? and node.id = ?
-    `).get(project, nodeAssetId) as { mime_type: string; size_bytes: number };
-    return { ...identity, mimeType: row.mime_type, sizeBytes: Number(row.size_bytes) };
+    `).get(project, nodeAssetId) as { mime_type: string; size_bytes: number; file_path?: string };
+    return { ...identity, mimeType: row.mime_type, sizeBytes: Number(row.size_bytes), ...(row.file_path ? { filePath: row.file_path } : {}) };
   } finally {
     database.close();
+  }
+}
+
+function contentError(code: string, message: string, status = 409): Error {
+  return Object.assign(new Error(message), { code, status });
+}
+
+function pathIsInside(root: string, candidate: string): boolean {
+  const child = relative(root, candidate);
+  return child !== '..' && !child.startsWith(`..${sep}`) && !isAbsolute(child);
+}
+
+function resolveNodeEditorContentPath(assetRoot: string, reference: string): string {
+  const root = realpathSync(assetRoot);
+  const candidates = isAbsolute(reference)
+    ? [resolve(reference)]
+    : reference === '.asset-scratch' || reference.startsWith(`.asset-scratch${sep}`) || reference === '.lineage' || reference.startsWith(`.lineage${sep}`)
+      ? [resolve(assetRoot, reference)]
+      : [resolve(assetRoot, reference), resolve(assetRoot, '.asset-scratch', reference)];
+  const candidate = candidates.find(existsSync);
+  if (!candidate) throw contentError('document-content-unavailable', 'current asset content is unavailable', 404);
+  if (lstatSync(candidate).isSymbolicLink()) throw contentError('document-content-invalid', 'current asset content must not be a symbolic link');
+  const canonical = realpathSync(candidate);
+  if (!pathIsInside(root, canonical)) throw contentError('document-content-invalid', 'current asset content must remain inside the active asset root');
+  return canonical;
+}
+
+export function readNodeEditorBaseContent(
+  assetRoot: string,
+  project: string,
+  rootAssetId: string,
+  nodeAssetId: string,
+  expected: { attemptId: string; checksumSha256: string; maxBytes: number },
+): NodeEditorBaseContent {
+  const base = getNodeEditorBase(project, rootAssetId, nodeAssetId);
+  if (base.attemptId !== expected.attemptId || base.checksumSha256 !== expected.checksumSha256) {
+    throw contentError('stale-base', 'current asset changed after the editor session started');
+  }
+  if (!base.filePath || !/^[a-f0-9]{64}$/.test(base.checksumSha256) || base.sizeBytes < 1 || base.sizeBytes > expected.maxBytes) {
+    throw contentError('document-content-invalid', 'current asset content metadata is invalid');
+  }
+  const path = resolveNodeEditorContentPath(assetRoot, base.filePath);
+  let fd: number | undefined;
+  try {
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.size !== base.sizeBytes || stat.size > expected.maxBytes) {
+      throw contentError('document-content-invalid', 'current asset content size does not match its immutable metadata');
+    }
+    const bytes = readFileSync(fd);
+    const checksum = createHash('sha256').update(bytes).digest('hex');
+    if (bytes.length !== base.sizeBytes || checksum !== base.checksumSha256) {
+      throw contentError('document-content-invalid', 'current asset content checksum does not match its immutable metadata');
+    }
+    return { attemptId: base.attemptId, checksumSha256: checksum, mimeType: base.mimeType, sizeBytes: bytes.length, bytes };
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
 }
 

@@ -9,8 +9,8 @@ export const referenceManifest = Object.freeze({
   protocol: [{
     major: 1,
     minMinor: 0,
-    maxMinor: 2,
-    features: ['document-read', 'save-proposal', 'proposal-status', 'proposal-cancel', 'terminal-close'],
+    maxMinor: 3,
+    features: ['document-read', 'document-content', 'save-proposal', 'proposal-status', 'proposal-cancel', 'terminal-close'],
     requiredFeatures: ['document-read', 'save-proposal', 'terminal-close']
   }],
   nodeEditors: [{
@@ -30,8 +30,8 @@ validateManifest(referenceManifest);
 export const referenceHostSupport = Object.freeze([{
   major: 1,
   minMinor: 0,
-  maxMinor: 2,
-  features: ['document-read', 'save-proposal', 'proposal-status', 'proposal-cancel', 'terminal-close'],
+  maxMinor: 3,
+  features: ['document-read', 'document-content', 'save-proposal', 'proposal-status', 'proposal-cancel', 'terminal-close'],
   requiredFeatures: ['terminal-close']
 }]);
 

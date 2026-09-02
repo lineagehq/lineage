@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 import { NodeEditorSessionController } from './nodeEditorSessionController';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -44,6 +45,41 @@ describe('NodeEditorSessionController', () => {
     window.dispatchEvent(new MessageEvent('message', { source: expectedWindow, origin: 'null', data: { type: 'reference.editor.connect', channelBinding: binding }, ports: [duplicate] }));
     expect(duplicate.close).toHaveBeenCalledOnce();
     await controller.close();
+    iframe.remove();
+  });
+
+  it('selects the canonical 1.3 namespace and transfers only verified bounded document bytes', async () => {
+    const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><text>source</text></svg>');
+    const checksum = createHash('sha256').update(svg).digest('hex');
+    const responses = [
+      { plugins: [{ pluginId: 'reference.editor', packageName: 'p', packageVersion: '1.0.0', displayName: 'Reference', contribution: { id: 'reference.editor', displayName: 'Reference editor', accepts: { mimeTypes: ['image/svg+xml'], maxBytes: 999 }, minimumViewport: { width: 640, height: 480 } }, protocol: { major: 1, minor: 3, features: ['document-read', 'document-content'] }, eligible: true }] },
+      { launch: { sessionId: 'session-content', launchCredential: 'secret-launch', binding: { profileId: 'p', pluginId: 'reference.editor', contributionId: 'reference.editor', sessionId: 'session-content', origin: window.location.origin, source: 'browser' }, expiresAt: Date.now() + 1000, editorUrl: 'http://127.0.0.1:1234/editor/index.html', runtimeOrigin: 'http://127.0.0.1:1234', pluginDisplayName: 'Reference editor' } },
+      { ok: true },
+    ];
+    const urls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      urls.push(url);
+      if (url.endsWith('/document/content')) return new Response(svg, { status: 200, headers: { 'content-type': 'image/svg+xml', 'content-length': String(svg.length), 'x-lineage-content-sha256': checksum } });
+      return new Response(JSON.stringify(responses.shift()), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const controller = new NodeEditorSessionController({ project: 'p', rootAssetId: 'r', nodeAssetId: 'n' });
+    await controller.launch();
+    const iframe = document.createElement('iframe'); document.body.append(iframe);
+    const binding = 'binding_content_1234';
+    const expectedWindow = iframe.contentWindow;
+    const connected = { close: vi.fn(), postMessage: vi.fn(), onmessage: null } as unknown as MessagePort;
+    iframe.src = controller.connect(iframe, binding);
+    expect(iframe.src).toContain('lineageProtocol=1.3');
+    window.dispatchEvent(new MessageEvent('message', { source: expectedWindow, origin: 'null', data: { type: 'reference.editor.connect', channelBinding: binding }, ports: [{ close: vi.fn() } as unknown as MessagePort] }));
+    window.dispatchEvent(new MessageEvent('message', { source: expectedWindow, origin: 'null', data: { type: 'lineage.node-editor.connect', channelBinding: binding }, ports: [connected] }));
+    expect(connected.postMessage).toHaveBeenCalledWith({ type: 'lineage.node-editor.connected', channelBinding: binding, message: 'Editor ready. Changes stay local until you save.' });
+    await vi.waitFor(() => expect(connected.postMessage).toHaveBeenCalledTimes(2));
+    const [documentMessage, transfer] = (connected.postMessage as ReturnType<typeof vi.fn>).mock.calls[1];
+    expect(documentMessage).toMatchObject({ type: 'lineage.node-editor.document', mimeType: 'image/svg+xml', sizeBytes: svg.length, checksumSha256: checksum, payload: expect.any(ArrayBuffer) });
+    expect([...new Uint8Array(documentMessage.payload)]).toEqual([...svg]);
+    expect(transfer).toEqual([documentMessage.payload]);
+    expect(urls.some(url => url.endsWith('/document/content'))).toBe(true);
+    expect(JSON.stringify(documentMessage)).not.toMatch(/session-content|credential|url|path/i);
     iframe.remove();
   });
 

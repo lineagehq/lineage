@@ -19,7 +19,8 @@ export type CanonicalSemver = string;
  * @minItems 1
  */
 export type ProtocolSupport = [ProtocolAdvertisement, ...ProtocolAdvertisement[]];
-export type Feature = 'document-read' | 'save-proposal' | 'proposal-status' | 'proposal-cancel' | 'terminal-close';
+export type Feature =
+  'document-read' | 'document-content' | 'save-proposal' | 'proposal-status' | 'proposal-cancel' | 'terminal-close';
 export type Capability = 'document.read' | 'proposal.create' | 'proposal.status' | 'proposal.cancel' | 'session.close';
 export type Digest = string;
 export type InstallReceipt =
@@ -50,7 +51,41 @@ export type BrowserMessage =
     }
   | {
       type: 'editor.close-ack';
+    }
+  | {
+      type: 'lineage.node-editor.connect';
+      channelBinding: OpaqueToken;
+    }
+  | {
+      type: 'lineage.node-editor.connected';
+      channelBinding: OpaqueToken;
+      message: string;
+    }
+  | {
+      type: 'lineage.node-editor.document';
+      mimeType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/svg+xml';
+      sizeBytes: number;
+      checksumSha256: HexDigest;
+      payload: unknown;
+    }
+  | {
+      type: 'lineage.node-editor.dirty';
+      dirty: true;
+    }
+  | {
+      type: 'lineage.node-editor.save';
+      summary: string;
+      mimeType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/svg+xml';
+      payload: unknown;
+    }
+  | {
+      type: 'lineage.node-editor.cancel';
+    }
+  | {
+      type: 'lineage.node-editor.state';
+      message: string;
     };
+export type HexDigest = string;
 export type ProxyRequest =
   | {
       type: 'document.read';

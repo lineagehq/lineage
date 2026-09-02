@@ -12,8 +12,8 @@ import type { NodeEditorPluginConfig } from '../../shared/nodeEditorPluginTypes'
 const lineageNodeEditorProtocolSupport: ReadonlyArray<Readonly<ProtocolAdvertisement>> = Object.freeze([{
   major: 1,
   minMinor: 0,
-  maxMinor: 2,
-  features: ['document-read', 'save-proposal', 'proposal-status', 'proposal-cancel', 'terminal-close'],
+  maxMinor: 3,
+  features: ['document-read', 'document-content', 'save-proposal', 'proposal-status', 'proposal-cancel', 'terminal-close'],
   requiredFeatures: ['document-read', 'save-proposal', 'terminal-close'],
 }]);
 const canonicalNodeEditorManifestPath = 'manifest.json';
@@ -30,7 +30,7 @@ export class NodeEditorPluginVerificationError extends Error {
 const identifierPattern = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
 const semverPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const entrypointPattern = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9][A-Za-z0-9._/-]*\.html$/;
-const features = new Set(['document-read', 'save-proposal', 'proposal-status', 'proposal-cancel', 'terminal-close']);
+const features = new Set(['document-read', 'document-content', 'save-proposal', 'proposal-status', 'proposal-cancel', 'terminal-close']);
 const capabilities = new Set(['document.read', 'proposal.create', 'proposal.status', 'proposal.cancel', 'session.close']);
 const mimeTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml']);
 

@@ -56,10 +56,12 @@ export function createNodeEditorTestContext(
   const timestamp = '2026-09-01T00:00:00.000Z';
   try {
     database.prepare('insert into projects (id, product, created_at, updated_at) values (?, ?, ?, ?)').run('test-project', 'test-project', timestamp, timestamp);
-    for (const [id, checksum] of [['root-asset', '1'.repeat(64)], ['node-asset', '2'.repeat(64)]]) {
+    for (const id of ['root-asset', 'node-asset']) {
+      mkdirSync(profile.asset_root, { recursive: true });
+      writeFileSync(join(profile.asset_root, `${id}.png`), tinyPng);
       database.prepare(`insert into assets (id, project_id, source, local_path, checksum_sha256, media_type, title, status, size_bytes, content_type, created_at, updated_at, last_seen_at)
         values (?, 'test-project', 'local', ?, ?, 'image', ?, 'working', 12, 'image/png', ?, ?, ?)`)
-        .run(id, `${id}.png`, checksum, id, timestamp, timestamp, timestamp);
+        .run(id, `${id}.png`, sha256(tinyPng), id, timestamp, timestamp, timestamp);
     }
     database.prepare("insert into asset_edges (id, project_id, parent_asset_id, child_asset_id, relation_type, created_at) values ('edge-1', 'test-project', 'root-asset', 'node-asset', 'derived_from', ?)").run(timestamp);
     database.prepare("insert into asset_reviews (asset_id, review_state, reviewed_at, notes, updated_at) values ('node-asset', 'approved', ?, 'preserve me', ?)").run(timestamp, timestamp);

@@ -3,6 +3,25 @@ import type { NodeEditorBrowserLaunch, NodeEditorPluginSummary, NodeEditorTermin
 type NodeEditorUiState = 'discovering' | 'ineligible' | 'launching' | 'active' | 'saving' | 'accepted' | 'cancelled' | 'stale' | 'expired' | 'failed' | 'closed';
 export interface NodeEditorControllerSnapshot { state: NodeEditorUiState; message: string; dirty?: boolean; plugin?: NodeEditorPluginSummary; launch?: Omit<NodeEditorBrowserLaunch, 'launchCredential'>; outcome?: NodeEditorTerminalOutcome }
 
+interface NodeEditorBridgeNames {
+  connect: string;
+  connected: string;
+  document: string;
+  dirty: string;
+  save: string;
+  cancel: string;
+  state: string;
+}
+
+const legacyBridge: Readonly<NodeEditorBridgeNames> = Object.freeze({
+  connect: 'reference.editor.connect', connected: 'lineage.editor.ack', document: '', dirty: 'reference.editor.dirty',
+  save: 'reference.editor.save', cancel: 'reference.editor.cancel', state: 'lineage.editor.state',
+});
+const canonicalBridge: Readonly<NodeEditorBridgeNames> = Object.freeze({
+  connect: 'lineage.node-editor.connect', connected: 'lineage.node-editor.connected', document: 'lineage.node-editor.document',
+  dirty: 'lineage.node-editor.dirty', save: 'lineage.node-editor.save', cancel: 'lineage.node-editor.cancel', state: 'lineage.node-editor.state',
+});
+
 async function json<T>(response: Response): Promise<T> {
   const value = await response.json() as T & { message?: string };
   if (!response.ok) throw new Error(value.message || `Node editor request failed (${response.status})`);
@@ -19,10 +38,11 @@ export class NodeEditorSessionController {
   #lifecycleEpoch = 0;
   #lifecycleOwners = 0;
   #releaseSequence = 0;
+  #bridge = legacyBridge;
   constructor(readonly target: { project: string; rootAssetId: string; nodeAssetId: string }) {}
   snapshot() { return this.#snapshot; }
   subscribe(listener: (snapshot: NodeEditorControllerSnapshot) => void) { this.#listeners.add(listener); listener(this.#snapshot); return () => { this.#listeners.delete(listener); }; }
-  #set(value: NodeEditorControllerSnapshot) { this.#snapshot = value; for (const listener of this.#listeners) listener(value); this.#channel?.postMessage({ type: 'lineage.editor.state', message: value.message }); }
+  #set(value: NodeEditorControllerSnapshot) { this.#snapshot = value; for (const listener of this.#listeners) listener(value); this.#channel?.postMessage({ type: this.#bridge.state, message: value.message }); }
 
   acquire(): () => void {
     this.#lifecycleOwners += 1;
@@ -56,6 +76,7 @@ export class NodeEditorSessionController {
       if (lifecycleEpoch !== this.#lifecycleEpoch) return;
       const plugin = discovery.plugins.find(candidate => candidate.eligible !== false);
       if (!plugin) { this.#set({ state: 'ineligible', message: 'No compatible editor is available for this current asset.' }); return; }
+      this.#bridge = plugin.protocol.major === 1 && plugin.protocol.minor >= 3 && plugin.protocol.features.includes('document-content') ? canonicalBridge : legacyBridge;
       this.#set({ state: 'launching', message: `Starting ${plugin.contribution.displayName}…`, plugin });
       const created = await json<{ launch: NodeEditorBrowserLaunch }>(await fetch(`/api/node-editor-plugins/${encodeURIComponent(plugin.contribution.id)}/sessions`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(this.target),
@@ -89,7 +110,7 @@ export class NodeEditorSessionController {
     const expectedWindow = frame.contentWindow;
     const receiveCandidate = (event: MessageEvent) => {
       const candidate = event.ports[0];
-      if (event.source !== expectedWindow || event.origin !== 'null' || event.data?.type !== 'reference.editor.connect' || event.data.channelBinding !== channelBinding || event.ports.length !== 1 || new URL(frame.src).origin !== launch.runtimeOrigin) {
+      if (event.source !== expectedWindow || event.origin !== 'null' || event.data?.type !== this.#bridge.connect || event.data.channelBinding !== channelBinding || Object.keys(event.data).sort().join(',') !== 'channelBinding,type' || event.ports.length !== 1 || new URL(frame.src).origin !== launch.runtimeOrigin) {
         for (const port of event.ports) port.close();
         return;
       }
@@ -99,17 +120,43 @@ export class NodeEditorSessionController {
       }
       this.#channel = candidate;
       this.#channel.onmessage = event => {
-        if (event.data?.type === 'reference.editor.dirty' && event.data.dirty === true && Object.keys(event.data).length === 2) this.#set({ ...this.#snapshot, dirty: true });
-        if (event.data?.type === 'reference.editor.save') void this.savePluginPayload(event.data);
-        if (event.data?.type === 'reference.editor.cancel') void this.cancel();
+        if (event.data?.type === this.#bridge.dirty && event.data.dirty === true && Object.keys(event.data).length === 2) this.#set({ ...this.#snapshot, dirty: true });
+        if (event.data?.type === this.#bridge.save) void this.savePluginPayload(event.data);
+        if (event.data?.type === this.#bridge.cancel && Object.keys(event.data).length === 1) void this.cancel();
       };
-      this.#channel.postMessage({ type: 'lineage.editor.ack', channelBinding, message: this.#snapshot.message });
+      this.#channel.postMessage({ type: this.#bridge.connected, channelBinding, message: this.#snapshot.message });
+      if (this.#bridge === canonicalBridge) void this.#transferDocument(candidate);
     };
     window.addEventListener('message', receiveCandidate);
     this.#removeHandshakeListener = () => window.removeEventListener('message', receiveCandidate);
     const editorUrl = new URL(launch.editorUrl);
-    editorUrl.hash = new URLSearchParams({ lineageParentOrigin: window.location.origin, lineageChannelBinding: channelBinding }).toString();
+    const protocol = this.#snapshot.plugin?.protocol;
+    editorUrl.hash = new URLSearchParams({
+      lineageParentOrigin: window.location.origin,
+      lineageChannelBinding: channelBinding,
+      lineageProtocol: `${protocol?.major ?? 1}.${protocol?.minor ?? 0}`,
+    }).toString();
     return editorUrl.toString();
+  }
+
+  async #transferDocument(channel: MessagePort): Promise<void> {
+    try {
+      const response = await fetch(`/api/node-editor-plugins/sessions/${this.#sessionId}/document/content`);
+      if (!response.ok) { await json(response); return; }
+      const mimeType = (response.headers.get('content-type') || '').split(';')[0];
+      const checksumSha256 = response.headers.get('x-lineage-content-sha256') || '';
+      const sizeBytes = Number(response.headers.get('content-length'));
+      const maximumBytes = Math.min(this.#snapshot.plugin?.contribution.accepts.maxBytes ?? 0, 16 * 1024 * 1024);
+      const payload = await response.arrayBuffer();
+      const actualChecksum = [...new Uint8Array(await crypto.subtle.digest('SHA-256', payload))].map(value => value.toString(16).padStart(2, '0')).join('');
+      if (channel !== this.#channel || !Number.isSafeInteger(sizeBytes) || sizeBytes < 1 || sizeBytes > maximumBytes || payload.byteLength !== sizeBytes
+        || !this.#snapshot.plugin?.contribution.accepts.mimeTypes.includes(mimeType as never) || !/^[a-f0-9]{64}$/.test(checksumSha256) || actualChecksum !== checksumSha256) {
+        throw new Error('Editor document content failed bounded integrity validation.');
+      }
+      channel.postMessage({ type: this.#bridge.document, mimeType, sizeBytes, checksumSha256, payload }, [payload]);
+    } catch (error) {
+      this.#set({ ...this.#snapshot, state: 'failed', message: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   async savePluginPayload(input: unknown): Promise<void> {
@@ -121,12 +168,16 @@ export class NodeEditorSessionController {
     const mimeType = typeof message.mimeType === 'string' ? message.mimeType : '';
     const payload = message.payload;
     const maximumBytes = Math.min(this.#snapshot.plugin?.contribution.accepts.maxBytes ?? 0, 16 * 1024 * 1024);
-    if (keys !== 'mimeType,payload,summary,type' || message.type !== 'reference.editor.save' || !(payload instanceof ArrayBuffer) || payload.byteLength < 8 || payload.byteLength > maximumBytes || !this.#snapshot.plugin?.contribution.accepts.mimeTypes.includes(mimeType as never) || editSummary.length < 1 || editSummary.length > 2048) {
+    if (keys !== 'mimeType,payload,summary,type' || message.type !== this.#bridge.save || !(payload instanceof ArrayBuffer) || payload.byteLength < 8 || payload.byteLength > maximumBytes || !this.#snapshot.plugin?.contribution.accepts.mimeTypes.includes(mimeType as never) || editSummary.length < 1 || editSummary.length > 2048) {
       this.#set({ ...this.#snapshot, state: 'failed', message: 'Editor payload is invalid.' });
       return;
     }
     const bytes = new Uint8Array(payload);
     if (mimeType === 'image/png' && ![0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((value, index) => bytes[index] === value)) {
+      this.#set({ ...this.#snapshot, state: 'failed', message: 'Editor payload signature is invalid.' });
+      return;
+    }
+    if (mimeType === 'image/svg+xml' && !/^\s*(?:<\?xml[^>]*>\s*)?<svg(?:\s|>)/i.test(new TextDecoder().decode(bytes.subarray(0, Math.min(bytes.length, 1024))))) {
       this.#set({ ...this.#snapshot, state: 'failed', message: 'Editor payload signature is invalid.' });
       return;
     }

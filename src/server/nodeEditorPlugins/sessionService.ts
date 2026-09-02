@@ -10,7 +10,7 @@ import type { ResolvedLineageProfile } from '../../shared/lineageProfileTypes';
 import { discardStagedNodeEditorContent, materializeNodeEditorContent, stageNodeEditorContent, type NodeEditorFaultInjector } from './materialization';
 import { NodeEditorPluginRegistry } from './registry';
 import { NodeEditorSessionAuthority, type CreatedNodeEditorAuthority } from './sessionAuthority';
-import { acceptNodeEditorResult, getNodeEditorBase, getNodeEditorTerminal, recordNodeEditorCancelled, recordNodeEditorStale } from './persistence';
+import { acceptNodeEditorResult, getNodeEditorBase, getNodeEditorTerminal, readNodeEditorBaseContent, recordNodeEditorCancelled, recordNodeEditorStale, type NodeEditorBaseContent } from './persistence';
 import { NodeEditorPluginSupervisor } from './supervisor';
 
 interface EditSession {
@@ -133,6 +133,18 @@ export class NodeEditorSessionService {
   browserDocument(sessionId: string): { baseAttemptId: string; baseChecksumSha256: string } {
     const session = this.#requireSession(sessionId);
     return { baseAttemptId: session.baseAttemptId, baseChecksumSha256: session.baseChecksumSha256 };
+  }
+
+  browserDocumentContent(sessionId: string): NodeEditorBaseContent {
+    const session = this.#requireSession(sessionId);
+    if (session.closed || !session.plugin.protocol.features.includes('document-content')) {
+      throw new NodeEditorSessionError('capability-scope-denied', 'document content is outside the negotiated session scope', 403);
+    }
+    return readNodeEditorBaseContent(this.#profile.asset_root, session.project, session.rootAssetId, session.nodeAssetId, {
+      attemptId: session.baseAttemptId,
+      checksumSha256: session.baseChecksumSha256,
+      maxBytes: Math.min(session.plugin.contribution.accepts.maxBytes, 16 * 1024 * 1024),
+    });
   }
 
   browserCreateProposal(sessionId: string, input: { proposalId: string; idempotencyKey: string; baseAttemptId: string; baseChecksumSha256: string; mimeType: NodeEditorProposalDeclaration['mimeType']; sizeBytes: number; checksumSha256: string; editSummary: string }): { proposalId: string; status: 'pending' } {

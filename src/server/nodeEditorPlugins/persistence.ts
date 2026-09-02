@@ -38,11 +38,22 @@ export function getNodeEditorTerminal(sessionId: string): NodeEditorTerminalOutc
   }
 }
 
-export function getNodeEditorBase(project: string, rootAssetId: string, nodeAssetId: string): { attemptId: string; checksumSha256: string } {
+export function getNodeEditorBase(project: string, rootAssetId: string, nodeAssetId: string): { attemptId: string; checksumSha256: string; mimeType: string; sizeBytes: number } {
   const database = lineageDb();
   try {
     assertNodeEditorTargetInTransaction(database, project, rootAssetId, nodeAssetId);
-    return getCurrentLineageAttemptIdentityInTransaction(database, project, nodeAssetId);
+    const identity = getCurrentLineageAttemptIdentityInTransaction(database, project, nodeAssetId);
+    const row = database.prepare(`
+      select coalesce(current_asset.content_type, node.content_type, 'application/octet-stream') mime_type,
+             coalesce(current_asset.size_bytes, node.size_bytes, 0) size_bytes
+      from assets node
+      left join asset_attempts current_attempt on current_attempt.project_id = node.project_id
+        and current_attempt.node_asset_id = node.id and current_attempt.is_current = 1
+      left join assets current_asset on current_asset.project_id = current_attempt.project_id
+        and current_asset.id = current_attempt.asset_id
+      where node.project_id = ? and node.id = ?
+    `).get(project, nodeAssetId) as { mime_type: string; size_bytes: number };
+    return { ...identity, mimeType: row.mime_type, sizeBytes: Number(row.size_bytes) };
   } finally {
     database.close();
   }

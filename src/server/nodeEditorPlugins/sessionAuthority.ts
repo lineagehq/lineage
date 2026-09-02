@@ -10,6 +10,7 @@ export class NodeEditorAuthorityError extends Error {
 
 interface AuthorityRecord {
   binding: NodeEditorSessionBinding;
+  processBinding: Omit<NodeEditorSessionBinding, 'source'> & { source: 'process' };
   launchHash: Buffer;
   launchExpiresAt: number;
   launchUsed: boolean;
@@ -55,16 +56,18 @@ export class NodeEditorSessionAuthority {
     this.#cookieTtlMs = options.cookieTtlMs ?? 300_000;
   }
 
-  create(input: Omit<NodeEditorSessionBinding, 'processId' | 'sessionId' | 'source'>): CreatedNodeEditorAuthority {
-    const sessionId = `session-${randomBytes(12).toString('hex')}`;
-    const processId = `process-${randomBytes(12).toString('hex')}`;
+  create(input: Omit<NodeEditorSessionBinding, 'processId' | 'sessionId' | 'source'> & { processId?: string; sessionId?: string; processOrigin?: string }): CreatedNodeEditorAuthority {
+    const sessionId = input.sessionId ?? `session-${randomBytes(12).toString('hex')}`;
+    const processId = input.processId ?? `process-${randomBytes(12).toString('hex')}`;
     const launchCredential = token(24);
     const processCapability = token(32);
     const expiresAt = this.#now() + this.#launchTtlMs;
-    const binding: NodeEditorSessionBinding = { ...input, processId, sessionId, source: 'browser' };
+    const binding: NodeEditorSessionBinding = { profileId: input.profileId, pluginId: input.pluginId, contributionId: input.contributionId, origin: input.origin, processId, sessionId, source: 'browser' };
+    const processBinding = { ...binding, origin: input.processOrigin ?? input.origin, source: 'process' as const };
     const processExpiresAt = this.#now() + this.#processTtlMs;
     this.#records.set(sessionId, {
       binding,
+      processBinding,
       launchHash: hash(launchCredential),
       launchExpiresAt: expiresAt,
       launchUsed: false,
@@ -81,7 +84,7 @@ export class NodeEditorSessionAuthority {
       },
       processCapability,
       processExpiresAt,
-      processBinding: { ...binding, source: 'process' },
+      processBinding,
     };
   }
 
@@ -115,7 +118,7 @@ export class NodeEditorSessionAuthority {
     const record = this.#records.get(sessionId);
     if (!record || record.revoked || !equalHash(capability, record.processHash)) throw new NodeEditorAuthorityError('authority-denied', 'process capability is invalid');
     if (this.#now() >= record.processExpiresAt) throw new NodeEditorAuthorityError('capability-expired', 'process capability expired');
-    const expected = { ...record.binding, source: 'process' as const };
+    const expected = record.processBinding;
     for (const key of ['profileId', 'pluginId', 'contributionId', 'processId', 'sessionId', 'origin', 'source'] as const) {
       if (binding[key] !== expected[key]) throw new NodeEditorAuthorityError(`${key}-binding-mismatch`, `process ${key} binding mismatch`);
     }

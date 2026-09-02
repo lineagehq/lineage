@@ -717,6 +717,105 @@ describe('project/workspace organization persistence', () => {
     })).toMatchObject({ project: { id: project, display_name: 'Project Delete Restored' } });
   });
 
+  it('binds node editor provenance and terminal state into project deletion', () => {
+    const project = 'project-delete-node-editor';
+    const assetId = `${project}-asset`;
+    const attemptId = `${project}:attempt:1`;
+    const sessionId = `${project}-session`;
+    const timestamp = '2026-07-29T12:00:00.000Z';
+    createProjectWorkspace({ id: project, displayName: 'Project Delete Node Editor', confirmWrite: true });
+    const physicalPath = join(assetRoot, project, 'preserved-editor.png');
+    writeFileSync(physicalPath, 'preserve-node-editor-media');
+    insertAsset(project, assetId, `${project}/preserved-editor.png`);
+
+    const setup = lineageDb();
+    setup.prepare(`
+      insert into asset_attempts (
+        id, project_id, node_asset_id, asset_id, attempt_index, source, prompt,
+        generation_job_id, file_path, checksum_sha256, created_at, promoted_at, is_current
+      ) values (?, ?, ?, ?, 1, 'editor', null, null, ?, ?, ?, ?, 1)
+    `).run(attemptId, project, assetId, assetId, `${project}/preserved-editor.png`, `${assetId}-checksum`, timestamp, timestamp);
+    setup.prepare(`
+      insert into node_editor_attempt_provenance (
+        attempt_id, session_id, project_id, node_asset_id, plugin_id, contribution_id,
+        plugin_package_name, plugin_package_version, protocol_major, protocol_minor,
+        protocol_features_json, capabilities_json, package_archive_sha256, manifest_sha256,
+        host_sha256, base_attempt_id, base_checksum_sha256, result_checksum_sha256,
+        result_mime_type, result_size_bytes, edit_summary_json, accepted_at
+      ) values (?, ?, ?, ?, 'reference.editor', 'reference.editor', '@mean-weasel/reference-editor',
+        '1.2.3', 1, 0, '[]', '[]', ?, ?, ?, ?, ?, ?, 'image/png', 26, ?, ?)
+    `).run(
+      attemptId,
+      sessionId,
+      project,
+      assetId,
+      'a'.repeat(64),
+      'b'.repeat(64),
+      'c'.repeat(64),
+      `${project}:attempt:base`,
+      'd'.repeat(64),
+      `${assetId}-checksum`,
+      JSON.stringify({ summary: 'Node editor deletion proof' }),
+      timestamp,
+    );
+    setup.prepare(`
+      insert into node_editor_terminal_results (
+        session_id, project_id, node_asset_id, proposal_id, idempotency_key, outcome,
+        code, asset_id, attempt_id, checksum_sha256, result_json, created_at
+      ) values (?, ?, ?, 'proposal', 'idempotency', 'accepted', null, ?, ?, ?, ?, ?)
+    `).run(
+      sessionId,
+      project,
+      assetId,
+      assetId,
+      attemptId,
+      `${assetId}-checksum`,
+      JSON.stringify({ outcome: 'accepted', sessionId, proposalId: 'proposal', assetId, attemptId, checksumSha256: `${assetId}-checksum` }),
+      timestamp,
+    );
+    setup.close();
+
+    const initial = planProjectDeletion(project);
+    expect(initial.counts).toContainEqual({ table: 'node_editor_attempt_provenance', count: 1 });
+    expect(initial.counts).toContainEqual({ table: 'node_editor_terminal_results', count: 1 });
+
+    const provenanceChanged = lineageDb();
+    provenanceChanged.prepare("update node_editor_attempt_provenance set edit_summary_json = '{\"summary\":\"changed\"}' where project_id = ?").run(project);
+    provenanceChanged.close();
+    expect(() => deleteProject(project, {
+      expectedDigest: initial.digest,
+      confirmation: 'Project Delete Node Editor',
+      confirmWrite: true,
+    })).toThrow(/changed/i);
+    const afterProvenance = planProjectDeletion(project);
+    expect(afterProvenance.state_digest).not.toBe(initial.state_digest);
+
+    const terminalChanged = lineageDb();
+    terminalChanged.prepare("update node_editor_terminal_results set result_json = '{\"outcome\":\"accepted\",\"changed\":true}' where project_id = ?").run(project);
+    terminalChanged.close();
+    expect(() => deleteProject(project, {
+      expectedDigest: afterProvenance.digest,
+      confirmation: 'Project Delete Node Editor',
+      confirmWrite: true,
+    })).toThrow(/changed/i);
+    const finalPlan = planProjectDeletion(project);
+    expect(finalPlan.state_digest).not.toBe(afterProvenance.state_digest);
+
+    expect(deleteProject(project, {
+      expectedDigest: finalPlan.digest,
+      confirmation: 'Project Delete Node Editor',
+      confirmWrite: true,
+    })).toMatchObject({ ok: true, preserved: { local_files: true, generated_files: true, cloud_objects: true } });
+    expect(existsSync(physicalPath)).toBe(true);
+    const verification = lineageDb();
+    expect(verification.prepare('select count(*) count from node_editor_attempt_provenance where project_id = ?').get(project)).toEqual({ count: 0 });
+    expect(verification.prepare('select count(*) count from node_editor_terminal_results where project_id = ?').get(project)).toEqual({ count: 0 });
+    expect(verification.prepare('select count(*) count from asset_attempts where project_id = ?').get(project)).toEqual({ count: 0 });
+    expect(verification.prepare('select count(*) count from assets where project_id = ?').get(project)).toEqual({ count: 0 });
+    expect(verification.prepare('pragma foreign_key_check').all()).toEqual([]);
+    verification.close();
+  });
+
   it('stales project deletion approval when catalog-only records change', () => {
     const project = 'catalog-deletion-plan';
     createProjectWorkspace({ id: project, displayName: 'Catalog Deletion Plan', confirmWrite: true });

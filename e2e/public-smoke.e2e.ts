@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext } from 'playwright/test';
+import { expect, test, type APIRequestContext, type Locator, type Page } from 'playwright/test';
 
 type WorkspaceListResponse = {
   workspaces?: Array<{ id: string; status?: string }>;
@@ -116,7 +116,7 @@ test('loads the demo lineage at its canonical project and workspace route', asyn
   await expect(rootNode).toHaveAttribute('data-lineage-root', 'true');
   expect(await rootNode.evaluate(node => node.closest('.react-flow__node')?.getAttribute('tabindex') ?? null)).toBeNull();
   await expect(page.getByTestId('lineage-canvas-status')).toHaveCount(0);
-  await page.waitForTimeout(500); // Allow the intentional first-load viewport fit to finish before preview arbitration.
+  await expectCanvasViewportReady(rootNode);
   await rootNode.hover();
   const hoverPreview = page.getByTestId('lineage-hover-preview');
   await expect(hoverPreview).toBeVisible();
@@ -170,8 +170,19 @@ test('loads the demo lineage at its canonical project and workspace route', asyn
   await rootNode.press('r');
   await expect(page.getByRole('dialog', { name: 'Describe the re-roll' })).toBeVisible();
   await page.getByRole('dialog', { name: 'Describe the re-roll' }).getByRole('button', { name: 'Cancel' }).click();
+});
 
-  const firstCandidate = page.locator('.lineage-node:not(.root-node)').first();
+test('keeps keyboard, pointer, and preview detail arbitration accessible', async ({ page, request }) => {
+  const workspaceId = await seedDemo(request);
+  await page.goto(demoCanvasPath(workspaceId));
+  await expect(page.locator('.lineage-workspace-title strong')).toHaveText('Demo: Content iteration tree', { timeout: 20_000 });
+  const rootNode = page.locator('.lineage-node.root-node');
+  const canvasTools = page.getByRole('region', { name: 'Canvas workspace tools' });
+  await expectCanvasViewportReady(rootNode);
+  const hoverPreview = page.getByTestId('lineage-hover-preview');
+
+  const firstCandidate = page.locator('.lineage-node:not(.root-node)[aria-label*=" details"]').first();
+  await expect(firstCandidate).toBeVisible();
   const anotherNodeTitle = await firstCandidate.locator('strong').textContent();
   expect(anotherNodeTitle).toBeTruthy();
   const anotherNode = page.locator('.lineage-node:not(.root-node)').filter({ hasText: anotherNodeTitle! }).first();
@@ -249,4 +260,15 @@ async function openCanvasSettings(page: Page) {
   const panel = page.getByRole('complementary', { name: 'Canvas settings' });
   if (!await panel.isVisible()) await page.getByRole('button', { name: 'Open Canvas settings' }).click();
   await expect(panel).toBeVisible();
+}
+
+async function expectCanvasViewportReady(node: Locator) {
+  await expect(node).toBeVisible();
+  await expect.poll(() => node.evaluate(async element => {
+    const viewport = element.closest<HTMLElement>('.react-flow__viewport');
+    if (!viewport || !viewport.style.transform) return false;
+    const transform = viewport.style.transform;
+    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    return viewport.style.transform === transform;
+  })).toBe(true);
 }

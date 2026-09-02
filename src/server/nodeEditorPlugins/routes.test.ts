@@ -16,6 +16,7 @@ import { createNodeEditorTestContext } from './testSupport';
 
 const scratch = join(repoRoot, '.asset-scratch', 'vitest-node-editor-routes');
 const referenceHostPath = join(repoRoot, 'packages', 'node-editor-reference-plugin', 'src', 'host.js');
+const referenceEditorPath = join(repoRoot, 'packages', 'node-editor-reference-plugin', 'editor', 'index.html');
 let server: ReturnType<Express['listen']> | undefined;
 let runtime: NodeEditorPluginRouteRuntime | undefined;
 const contexts: Array<ReturnType<typeof createNodeEditorTestContext>> = [];
@@ -29,10 +30,13 @@ function enabledConfig(): NodeEditorPluginConfig {
   const archivePath = join(scratch, 'plugin.tgz');
   const manifestBytes = `${JSON.stringify(referenceManifest)}\n`;
   const hostBytes = readFileSync(referenceHostPath);
+  const editorBytes = readFileSync(referenceEditorPath);
   const archiveBytes = Buffer.from('route archive');
   mkdirSync(join(root, 'src'), { recursive: true });
+  mkdirSync(join(root, 'editor'), { recursive: true });
   writeFileSync(manifestPath, manifestBytes);
   writeFileSync(hostPath, hostBytes);
+  writeFileSync(join(root, 'editor', 'index.html'), editorBytes);
   writeFileSync(archivePath, archiveBytes);
   return {
     schemaVersion: 1,
@@ -46,6 +50,7 @@ function enabledConfig(): NodeEditorPluginConfig {
       manifestSha256: sha256(manifestBytes),
       extractedRoot: root,
       hostSha256: sha256(hostBytes),
+      editorSha256: sha256(editorBytes),
     }],
   };
 }
@@ -95,15 +100,29 @@ describe('node editor plugin routes', () => {
     }
   });
 
+  it('rate limits session authority attempts before repeated authorization work', async () => {
+    const base = await serve(enabledConfig());
+    const responses = await Promise.all(Array.from({ length: 121 }, () => (
+      fetch(`${base}/api/node-editor-plugins/sessions/missing/document`)
+    )));
+
+    expect(responses.filter(response => response.status === 404)).toHaveLength(120);
+    expect(responses.filter(response => response.status === 429)).toHaveLength(1);
+    const limited = responses.find(response => response.status === 429);
+    expect(limited?.headers.get('ratelimit')).toBeTruthy();
+    expect(await limited?.json()).toMatchObject({ error: 'node_editor_rate_limited' });
+  });
+
   it('runs the real host through a configured lineage-dev.localhost origin and preserves exact launch binding', async () => {
     const context = createNodeEditorTestContext('routes-session');
     contexts.push(context);
     const base = await serve(context.config, context.profile);
-    const createdResponse = await fetch(`${base}/api/node-editor-plugins/reference.editor/sessions`, {
+    const controllerBase = base.replace('127.0.0.1', 'lineage-dev.localhost');
+    const createdResponse = await fetch(`${controllerBase}/api/node-editor-plugins/reference.editor/sessions`, {
       body: JSON.stringify({ project: 'test-project', rootAssetId: 'root-asset', nodeAssetId: 'node-asset' }),
-      headers: { 'content-type': 'application/json', host: `lineage-dev.localhost:${new URL(base).port}` }, method: 'POST',
+      headers: { 'content-type': 'application/json' }, method: 'POST',
     });
-    const created = await createdResponse.json() as { launch: { sessionId: string; launchCredential: string; binding: Record<string, string> } };
+    const created = await createdResponse.json() as { launch: { sessionId: string; launchCredential: string; editorUrl: string; runtimeOrigin: string; binding: Record<string, string> } };
     expect(createdResponse.status).toBe(201);
     expect(JSON.stringify(created)).not.toMatch(/processCapability|bootstrap|controlCredential|cookie/);
     const exchangeBody = JSON.stringify({
@@ -113,33 +132,41 @@ describe('node editor plugin routes', () => {
       contributionId: created.launch.binding.contributionId,
       source: 'browser',
     });
-    const wrongOrigin = await fetch(`${base}/api/node-editor-plugins/sessions/${created.launch.sessionId}/exchange`, {
-      body: exchangeBody, headers: { 'content-type': 'application/json', origin: 'https://wrong.test.invalid' }, method: 'POST',
-    });
-    expect(wrongOrigin.status).toBe(401);
-    const exchanged = await fetch(`${base}/api/node-editor-plugins/sessions/${created.launch.sessionId}/exchange`, {
-      body: exchangeBody, headers: { 'content-type': 'application/json', origin: 'https://editor.test.invalid' }, method: 'POST',
+    expect(new URL(created.launch.editorUrl).origin).toBe(created.launch.runtimeOrigin);
+    expect(created.launch.binding.origin).toBe(controllerBase);
+    expect(created.launch.binding.origin).not.toBe(created.launch.runtimeOrigin);
+    const editor = await fetch(created.launch.editorUrl);
+    expect(editor.ok).toBe(true);
+    expect(editor.headers.get('cache-control')).toBe('no-store');
+    const exchanged = await fetch(`${controllerBase}/api/node-editor-plugins/sessions/${created.launch.sessionId}/exchange`, {
+      body: exchangeBody, headers: { 'content-type': 'application/json' }, method: 'POST',
     });
     const cookie = exchanged.headers.get('set-cookie') || '';
     expect(cookie).toContain('HttpOnly');
     expect(cookie).toContain('SameSite=Strict');
     expect(cookie).toContain(`Path=/api/node-editor-plugins/sessions/${created.launch.sessionId}`);
-    const replay = await fetch(`${base}/api/node-editor-plugins/sessions/${created.launch.sessionId}/exchange`, {
-      body: exchangeBody, headers: { 'content-type': 'application/json', origin: 'https://editor.test.invalid' }, method: 'POST',
+    const replay = await fetch(`${controllerBase}/api/node-editor-plugins/sessions/${created.launch.sessionId}/exchange`, {
+      body: exchangeBody, headers: { 'content-type': 'application/json' }, method: 'POST',
     });
     expect(replay.status).toBe(401);
-    const service = runtime?.sessionService;
-    if (!service) throw new Error('expected node editor session service');
-    const deadline = Date.now() + 5_000;
-    let terminal = service.terminal(created.launch.sessionId);
-    while (!terminal && Date.now() < deadline) {
-      await new Promise(resolve => setTimeout(resolve, 25));
-      terminal = service.terminal(created.launch.sessionId);
-    }
-    expect(terminal).toMatchObject({ outcome: 'accepted' });
-    const proposalId = terminal?.proposalId || '';
-    const retry = await fetch(`${base}/api/node-editor-plugins/sessions/${created.launch.sessionId}/proposals/${proposalId}/content`, {
-      body: Buffer.alloc(1_000_000), headers: { cookie: cookie.split(';')[0], origin: 'https://editor.test.invalid' }, method: 'PUT',
+    const browserCookie = cookie.split(';')[0];
+    const wrongOriginDocument = await fetch(`${base}/api/node-editor-plugins/sessions/${created.launch.sessionId}/document`, { headers: { cookie: browserCookie } });
+    expect(wrongOriginDocument.status).toBe(401);
+    const mismatchedOriginHeader = await fetch(`${controllerBase}/api/node-editor-plugins/sessions/${created.launch.sessionId}/document`, { headers: { cookie: browserCookie, origin: base } });
+    expect(mismatchedOriginHeader.status).toBe(403);
+    const document = await (await fetch(`${controllerBase}/api/node-editor-plugins/sessions/${created.launch.sessionId}/document`, { headers: { cookie: browserCookie } })).json() as { document: { baseAttemptId: string; baseChecksumSha256: string } };
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+    const proposalId = 'proposal-browser-route';
+    const proposal = await fetch(`${controllerBase}/api/node-editor-plugins/sessions/${created.launch.sessionId}/proposals`, {
+      body: JSON.stringify({ proposalId, idempotencyKey: 'idem-browser-route', ...document.document, mimeType: 'image/png', sizeBytes: bytes.length, checksumSha256: sha256(bytes), editSummary: 'Browser route edit' }),
+      headers: { cookie: browserCookie, 'content-type': 'application/json' }, method: 'POST',
+    });
+    expect(proposal.status).toBe(201);
+    const upload = await fetch(`${controllerBase}/api/node-editor-plugins/sessions/${created.launch.sessionId}/proposals/${proposalId}/content`, { body: bytes, headers: { cookie: browserCookie }, method: 'PUT' });
+    const terminal = (await upload.json() as { outcome: { outcome: string; proposalId: string } }).outcome;
+    expect(terminal).toMatchObject({ outcome: 'accepted', proposalId });
+    const retry = await fetch(`${controllerBase}/api/node-editor-plugins/sessions/${created.launch.sessionId}/proposals/${proposalId}/content`, {
+      body: Buffer.alloc(1_000_000), headers: { cookie: browserCookie }, method: 'PUT',
     });
     expect(retry.ok).toBe(true);
     expect(await retry.json()).toMatchObject({ outcome: terminal });

@@ -75,6 +75,7 @@
     "@dagrejs/dagre": "^3.0.0",
     "@xyflow/react": "^12.11.1",
     "express": "^4.19.2",
+    "express-rate-limit": "^8.7.0",
     "lucide-react": "^0.468.0",
     "multer": "^2.2.0",
     "react": "^18.3.1",

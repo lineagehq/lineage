@@ -2,7 +2,7 @@ import type { Readable } from 'node:stream';
 import type { Capability, ProxyRequest, ProxyResult } from '../../../packages/node-editor-protocol/generated/protocol';
 import type {
   NodeEditorProposalDeclaration,
-  NodeEditorSessionLaunch,
+  NodeEditorBrowserLaunch,
   NodeEditorTerminalOutcome,
   VerifiedNodeEditorPlugin,
 } from '../../shared/nodeEditorPluginTypes';
@@ -68,14 +68,20 @@ export class NodeEditorSessionService {
     this.#inject = input.inject;
   }
 
-  async create(input: { contributionId: string; project: string; rootAssetId: string; nodeAssetId: string; serverOrigin?: string }): Promise<NodeEditorSessionLaunch> {
+  async create(input: { contributionId: string; project: string; rootAssetId: string; nodeAssetId: string; serverOrigin?: string; controllerOrigin?: string }): Promise<NodeEditorBrowserLaunch> {
     const plugin = this.#registry.get(input.contributionId);
     const base = getNodeEditorBase(input.project, input.rootAssetId, input.nodeAssetId);
+    if (!plugin.contribution.accepts.mimeTypes.includes(base.mimeType as never)) throw new NodeEditorSessionError('ineligible-mime-type', 'current asset MIME type is not supported', 409);
+    if (base.sizeBytes > plugin.contribution.accepts.maxBytes) throw new NodeEditorSessionError('ineligible-size', 'current asset exceeds editor byte limit', 409);
+    const prepared = await this.#supervisor.prepareSession(input.contributionId);
     const authority = this.#authority.create({
       profileId: this.#profile.profile_id,
       pluginId: plugin.manifest.pluginId,
       contributionId: plugin.contribution.id,
-      origin: plugin.contribution.editor.origin,
+      origin: input.controllerOrigin ?? input.serverOrigin ?? 'http://lineage.test.invalid',
+      processOrigin: prepared.editorOrigin,
+      processId: prepared.processId,
+      sessionId: prepared.sessionId,
     });
     const session: EditSession = {
       authority,
@@ -101,10 +107,11 @@ export class NodeEditorSessionService {
       this.#sessions.delete(authority.launch.sessionId);
       throw error;
     }
-    return authority.launch;
+    return { ...authority.launch, editorUrl: prepared.editorUrl, runtimeOrigin: prepared.editorOrigin, pluginDisplayName: plugin.contribution.displayName };
   }
 
   exchange(input: { sessionId: string; launchCredential: string; profileId: string; pluginId: string; contributionId: string; origin: string; source: 'browser' }): { cookie: string; path: string; expiresAt: number } {
+    this.#requireSession(input.sessionId);
     const exchanged = this.#authority.exchange({ sessionId: input.sessionId, launchCredential: input.launchCredential, binding: input });
     return { cookie: exchanged.cookie, path: this.cookiePath(input.sessionId), expiresAt: exchanged.expiresAt };
   }
@@ -113,8 +120,52 @@ export class NodeEditorSessionService {
     return `/api/node-editor-plugins/sessions/${sessionId}`;
   }
 
+  eligibility(project: string, rootAssetId: string, nodeAssetId: string): { mimeType: string; sizeBytes: number } {
+    const base = getNodeEditorBase(project, rootAssetId, nodeAssetId);
+    return { mimeType: base.mimeType, sizeBytes: base.sizeBytes };
+  }
+
   authorizeBrowser(sessionId: string, cookie: string, origin: string): void {
+    this.#requireSession(sessionId);
     this.#authority.authorizeCookie(sessionId, cookie, origin);
+  }
+
+  browserDocument(sessionId: string): { baseAttemptId: string; baseChecksumSha256: string } {
+    const session = this.#requireSession(sessionId);
+    return { baseAttemptId: session.baseAttemptId, baseChecksumSha256: session.baseChecksumSha256 };
+  }
+
+  browserCreateProposal(sessionId: string, input: { proposalId: string; idempotencyKey: string; baseAttemptId: string; baseChecksumSha256: string; mimeType: NodeEditorProposalDeclaration['mimeType']; sizeBytes: number; checksumSha256: string; editSummary: string }): { proposalId: string; status: 'pending' } {
+    const session = this.#requireSession(sessionId);
+    if (session.closed || session.proposal) throw new NodeEditorSessionError('duplicate-proposal', 'proposal already exists', 409);
+    if (input.baseAttemptId !== session.baseAttemptId || input.baseChecksumSha256 !== session.baseChecksumSha256) throw new NodeEditorSessionError('stale-base', 'proposal base is stale', 409);
+    if (!session.plugin.contribution.accepts.mimeTypes.includes(input.mimeType) || input.sizeBytes < 1 || input.sizeBytes > session.plugin.contribution.accepts.maxBytes || !/^[a-f0-9]{64}$/.test(input.checksumSha256) || input.editSummary.length < 1 || input.editSummary.length > 2048) throw new NodeEditorSessionError('invalid-message', 'proposal declaration is invalid');
+    session.proposal = { ...input, baseChecksum: input.baseChecksumSha256 };
+    return { proposalId: input.proposalId, status: 'pending' };
+  }
+
+  browserStatus(sessionId: string): { status: 'active' | 'accepted' | 'stale' | 'cancelled' | 'closed'; outcome?: NodeEditorTerminalOutcome } {
+    const session = this.#requireSession(sessionId);
+    const outcome = getNodeEditorTerminal(sessionId);
+    return { status: outcome?.outcome ?? (session.closed ? 'closed' : 'active'), ...(outcome ? { outcome } : {}) };
+  }
+
+  browserCancel(sessionId: string): NodeEditorTerminalOutcome {
+    const session = this.#requireSession(sessionId);
+    const prior = getNodeEditorTerminal(sessionId);
+    if (prior) return prior;
+    const proposal = session.proposal ?? { proposalId: `cancel-${sessionId.slice(-16)}`, idempotencyKey: `cancel-${sessionId.slice(-16)}`, baseAttemptId: session.baseAttemptId, baseChecksum: session.baseChecksumSha256, mimeType: 'image/png' as const, sizeBytes: 1, checksumSha256: '0'.repeat(64), editSummary: 'Cancelled' };
+    const outcome = recordNodeEditorCancelled(this.#acceptanceInput(session, proposal));
+    session.closed = true;
+    this.#authority.revoke(sessionId);
+    return outcome;
+  }
+
+  browserClose(sessionId: string): { closed: true } {
+    const session = this.#requireSession(sessionId);
+    session.closed = true;
+    this.#authority.revoke(sessionId);
+    return { closed: true };
   }
 
   authorizeProcessUpload(sessionId: string, capability: string): void {
@@ -125,6 +176,7 @@ export class NodeEditorSessionService {
   authorizeTerminalRetry(sessionId: string, cookie: string, origin: string, proposalId: string): NodeEditorTerminalOutcome {
     const terminal = getNodeEditorTerminal(sessionId);
     if (!terminal || terminal.proposalId !== proposalId) throw new NodeEditorSessionError('proposal-terminal', 'no matching terminal result', 404);
+    this.#requireSession(sessionId);
     this.#authority.authorizeTerminalCookie(sessionId, cookie, origin);
     return terminal;
   }

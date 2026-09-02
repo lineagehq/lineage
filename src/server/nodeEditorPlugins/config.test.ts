@@ -53,6 +53,7 @@ describe('node editor plugin config', () => {
         manifestSha256: 'b'.repeat(64),
         extractedRoot: '/tmp/plugin',
         hostSha256: 'c'.repeat(64),
+        editorSha256: 'd'.repeat(64),
         command: '/bin/sh',
         args: ['-c', 'anything'],
       }],

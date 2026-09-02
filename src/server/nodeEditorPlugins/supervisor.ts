@@ -1,5 +1,6 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import type { Duplex } from 'node:stream';
 import type { NodeEditorHostPublicStatus, VerifiedNodeEditorPlugin } from '../../shared/nodeEditorPluginTypes';
 import { NodeEditorPluginRegistry } from './registry';
@@ -16,11 +17,14 @@ interface PrivateBootstrap {
   profileId: string;
   controlCredential: string;
   idleTimeoutMs: number;
+  editorHtmlBase64: string;
+  editorSha256: string;
 }
 
 interface RunningHost {
   child: ChildProcess;
   controlOrigin: string;
+  editorOrigin: string;
   controlCredential: string;
   status: NodeEditorHostPublicStatus;
   healthTimer?: NodeJS.Timeout;
@@ -48,6 +52,13 @@ export interface NodeEditorPrivateProcessAuthority {
     origin: string;
     source: 'process';
   };
+}
+
+export interface PreparedNodeEditorHost {
+  processId: string;
+  sessionId: string;
+  editorOrigin: string;
+  editorUrl: string;
 }
 
 export class NodeEditorPluginSupervisor {
@@ -107,6 +118,21 @@ export class NodeEditorPluginSupervisor {
     if (!response.ok) throw new Error(`reference host rejected process authority (${response.status})`);
   }
 
+  async prepareSession(contributionId: string): Promise<PreparedNodeEditorHost> {
+    const prior = this.#hosts.get(contributionId);
+    if (prior) await this.#stop(contributionId);
+    const plugin = this.#registry.get(contributionId);
+    const running = await this.#launch(plugin);
+    this.#hosts.set(contributionId, running);
+    this.#last.set(contributionId, running.status);
+    return {
+      processId: running.processId,
+      sessionId: running.sessionId,
+      editorOrigin: running.editorOrigin,
+      editorUrl: `${running.editorOrigin}/${plugin.contribution.editor.entrypoint}`,
+    };
+  }
+
   async #launch(plugin: VerifiedNodeEditorPlugin, identity?: { processId: string; sessionId: string }): Promise<RunningHost> {
     const installation = plugin.installation;
     const child = this.#options.spawnProcess(process.execPath, [plugin.hostPath], {
@@ -123,6 +149,11 @@ export class NodeEditorPluginSupervisor {
     }
     const processId = identity?.processId ?? `process-${randomBytes(12).toString('hex')}`;
     const sessionId = identity?.sessionId ?? `session-${randomBytes(12).toString('hex')}`;
+    const editorBytes = readFileSync(plugin.editorPath);
+    if (createHash('sha256').update(editorBytes).digest('hex') !== plugin.installation.editorSha256) {
+      child.kill();
+      throw new Error('exact editor-byte SHA-256 mismatch before launch');
+    }
     const payload: PrivateBootstrap = {
       bootstrap: {
         type: 'bootstrap',
@@ -135,16 +166,19 @@ export class NodeEditorPluginSupervisor {
       profileId: this.#profileId,
       controlCredential: randomBytes(32).toString('base64url'),
       idleTimeoutMs: this.#options.idleTimeoutMs,
+      editorHtmlBase64: editorBytes.toString('base64'),
+      editorSha256: plugin.installation.editorSha256,
     };
     const readyPromise = this.#readReady(bootstrapPipe, child);
     bootstrapPipe.end(`${JSON.stringify(payload)}\n`);
-    let ready: { type: string; origin: string; pluginId: string; profileId: string };
+    let ready: { type: string; controlOrigin: string; editorOrigin: string; pluginId: string; profileId: string };
     try {
       ready = await readyPromise;
       if (ready.type !== 'host.ready' || ready.pluginId !== plugin.manifest.pluginId || ready.profileId !== this.#profileId) {
         throw new Error('reference host readiness binding mismatch');
       }
-      const response = await this.#controlFetch(ready.origin, payload.controlCredential, '/health');
+      if (ready.controlOrigin === ready.editorOrigin) throw new Error('reference host control and editor origins must be distinct');
+      const response = await this.#controlFetch(ready.controlOrigin, payload.controlCredential, '/health');
       if (!response.ok) throw new Error(`reference host health check failed (${response.status})`);
     } catch (error) {
       child.kill();
@@ -152,7 +186,8 @@ export class NodeEditorPluginSupervisor {
     }
     const running: RunningHost = {
       child,
-      controlOrigin: ready.origin,
+      controlOrigin: ready.controlOrigin,
+      editorOrigin: ready.editorOrigin,
       controlCredential: payload.controlCredential,
       status: { contributionId, state: 'ready', startedAt },
       processId,
@@ -180,7 +215,7 @@ export class NodeEditorPluginSupervisor {
     return running;
   }
 
-  #readReady(pipe: Duplex, child: ChildProcess): Promise<{ type: string; origin: string; pluginId: string; profileId: string }> {
+  #readReady(pipe: Duplex, child: ChildProcess): Promise<{ type: string; controlOrigin: string; editorOrigin: string; pluginId: string; profileId: string }> {
     return new Promise((resolve, reject) => {
       let buffer = '';
       const timeout = setTimeout(() => reject(new Error('reference host bootstrap timed out')), this.#options.bootstrapTimeoutMs);
@@ -193,7 +228,7 @@ export class NodeEditorPluginSupervisor {
         const newline = buffer.indexOf('\n');
         if (newline < 0) return;
         try {
-          const value = JSON.parse(buffer.slice(0, newline)) as { type: string; origin: string; pluginId: string; profileId: string };
+          const value = JSON.parse(buffer.slice(0, newline)) as { type: string; controlOrigin: string; editorOrigin: string; pluginId: string; profileId: string };
           clearTimeout(timeout);
           resolve(value);
         } catch (error) {

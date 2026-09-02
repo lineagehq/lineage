@@ -11,6 +11,7 @@ export interface NodeEditorVerifiedInstallationRecord {
   manifestSha256: string;
   extractedRoot: string;
   hostSha256: string;
+  editorSha256: string;
 }
 
 export interface NodeEditorPluginConfig {
@@ -24,6 +25,7 @@ export interface VerifiedNodeEditorPlugin {
   contribution: NodeEditorContribution;
   installation: NodeEditorVerifiedInstallationRecord;
   hostPath: string;
+  editorPath: string;
   protocol: { major: number; minor: number; features: Feature[]; capabilities: Capability[] };
 }
 
@@ -39,6 +41,14 @@ export interface NodeEditorPluginSummary {
     minimumViewport: NodeEditorContribution['minimumViewport'];
   };
   protocol: { major: number; minor: number; features: string[] };
+  eligible?: boolean;
+  ineligibleReason?: 'mime-type' | 'size';
+}
+
+export interface NodeEditorBrowserLaunch extends NodeEditorSessionLaunch {
+  editorUrl: string;
+  runtimeOrigin: string;
+  pluginDisplayName: string;
 }
 
 type NodeEditorHostState = 'starting' | 'ready' | 'stopped' | 'failed';

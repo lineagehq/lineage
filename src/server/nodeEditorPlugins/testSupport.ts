@@ -13,6 +13,7 @@ import { NodeEditorSessionService } from './sessionService';
 
 const manifest = positiveFixtures[0].value as PluginManifest;
 const referenceHostPath = join(repoRoot, 'packages', 'node-editor-reference-plugin', 'src', 'host.js');
+const referenceEditorPath = join(repoRoot, 'packages', 'node-editor-reference-plugin', 'editor', 'index.html');
 export const tinyPng = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
 export const sha256 = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex');
 
@@ -28,10 +29,13 @@ export function createNodeEditorTestContext(
   const extractedRoot = join(root, 'plugin');
   const manifestBytes = `${JSON.stringify(selectedManifest)}\n`;
   const hostBytes = readFileSync(referenceHostPath);
+  const editorBytes = readFileSync(referenceEditorPath);
   const archiveBytes = Buffer.from(`archive-${name}`);
   mkdirSync(join(extractedRoot, 'src'), { recursive: true });
+  mkdirSync(join(extractedRoot, 'editor'), { recursive: true });
   writeFileSync(join(extractedRoot, 'manifest.json'), manifestBytes);
   writeFileSync(join(extractedRoot, 'src', 'host.js'), hostBytes);
+  writeFileSync(join(extractedRoot, 'editor', 'index.html'), editorBytes);
   writeFileSync(join(root, 'plugin.tgz'), archiveBytes);
   const config: NodeEditorPluginConfig = {
     schemaVersion: 1,
@@ -45,6 +49,7 @@ export function createNodeEditorTestContext(
       manifestSha256: sha256(manifestBytes),
       extractedRoot,
       hostSha256: sha256(hostBytes),
+      editorSha256: sha256(editorBytes),
     }],
   };
   const database = lineageDb();
@@ -52,8 +57,8 @@ export function createNodeEditorTestContext(
   try {
     database.prepare('insert into projects (id, product, created_at, updated_at) values (?, ?, ?, ?)').run('test-project', 'test-project', timestamp, timestamp);
     for (const [id, checksum] of [['root-asset', '1'.repeat(64)], ['node-asset', '2'.repeat(64)]]) {
-      database.prepare(`insert into assets (id, project_id, source, local_path, checksum_sha256, media_type, title, status, created_at, updated_at, last_seen_at)
-        values (?, 'test-project', 'local', ?, ?, 'image', ?, 'working', ?, ?, ?)`)
+      database.prepare(`insert into assets (id, project_id, source, local_path, checksum_sha256, media_type, title, status, size_bytes, content_type, created_at, updated_at, last_seen_at)
+        values (?, 'test-project', 'local', ?, ?, 'image', ?, 'working', 12, 'image/png', ?, ?, ?)`)
         .run(id, `${id}.png`, checksum, id, timestamp, timestamp, timestamp);
     }
     database.prepare("insert into asset_edges (id, project_id, parent_asset_id, child_asset_id, relation_type, created_at) values ('edge-1', 'test-project', 'root-asset', 'node-asset', 'derived_from', ?)").run(timestamp);

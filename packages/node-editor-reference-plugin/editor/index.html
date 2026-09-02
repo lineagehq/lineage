@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reference editor</title>
+<style>
+  :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #121417; color: #f4f6f8; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; }
+  main { width: min(36rem, calc(100% - 2rem)); display: grid; gap: 1rem; }
+  textarea { min-height: 7rem; padding: .75rem; font: inherit; }
+  .actions { display: flex; gap: .75rem; }
+  button { padding: .7rem 1rem; font: inherit; }
+</style>
+<main>
+  <h1>Reference editor</h1>
+  <p id="status" role="status">Connecting securely to Lineage…</p>
+  <label>Edit summary<textarea id="summary">Reference browser edit</textarea></label>
+  <div class="actions"><button id="save" disabled>Save edit</button><button id="cancel" disabled>Cancel</button></div>
+</main>
+<script>
+  let channel;
+  const candidates = new Set();
+  const fragment = new URLSearchParams(location.hash.slice(1));
+  const parentOrigin = fragment.get('lineageParentOrigin');
+  const channelBinding = fragment.get('lineageChannelBinding');
+  const maxConnectAttempts = 20;
+  const connectRetryMilliseconds = 100;
+  let connectAttempts = 0;
+  let retryTimer;
+  const maximumPayloadBytes = 1024 * 1024;
+
+  function validParentOrigin(value) {
+    try { return Boolean(value) && new URL(value).origin === value; } catch { return false; }
+  }
+
+  function closeCandidates(except) {
+    for (const candidate of candidates) {
+      if (candidate !== except) candidate.close();
+    }
+    candidates.clear();
+    if (except) candidates.add(except);
+  }
+
+  function connect() {
+    if (channel) return;
+    if (connectAttempts >= maxConnectAttempts) {
+      closeCandidates();
+      document.querySelector('#status').textContent = 'Could not establish a secure Lineage connection.';
+      return;
+    }
+    connectAttempts += 1;
+    const pair = new MessageChannel();
+    const candidate = pair.port1;
+    candidates.add(candidate);
+    candidate.onmessage = message => {
+      if (!channel && message.data?.type === 'lineage.editor.ack' && message.data.channelBinding === channelBinding) {
+        channel = candidate;
+        clearTimeout(retryTimer);
+        closeCandidates(candidate);
+        document.querySelector('#status').textContent = message.data.message;
+        document.querySelectorAll('button').forEach(button => { button.disabled = false; });
+        return;
+      }
+      if (channel === candidate && message.data?.type === 'lineage.editor.state') {
+        document.querySelector('#status').textContent = message.data.message;
+      }
+    };
+    parent.postMessage({ type: 'reference.editor.connect', channelBinding }, parentOrigin, [pair.port2]);
+    retryTimer = setTimeout(connect, connectRetryMilliseconds);
+  }
+
+  if (validParentOrigin(parentOrigin) && channelBinding && /^[A-Za-z0-9_-]{16,128}$/.test(channelBinding)) {
+    connect();
+  }
+  function editPayload() {
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+    if (bytes.byteLength > maximumPayloadBytes) throw new Error('Reference edit exceeds its transfer limit.');
+    return bytes;
+  }
+  document.querySelector('#summary').addEventListener('input', () => channel?.postMessage({ type: 'reference.editor.dirty', dirty: true }));
+  document.querySelector('#save').addEventListener('click', () => {
+    const bytes = editPayload();
+    channel?.postMessage({ type: 'reference.editor.save', summary: document.querySelector('#summary').value, mimeType: 'image/png', payload: bytes.buffer }, [bytes.buffer]);
+  });
+  document.querySelector('#cancel').addEventListener('click', () => channel?.postMessage({ type: 'reference.editor.cancel' }));
+</script>
+</html>

@@ -18,6 +18,7 @@ const lineageNodeEditorProtocolSupport: ReadonlyArray<Readonly<ProtocolAdvertise
 }]);
 const canonicalNodeEditorManifestPath = 'manifest.json';
 const canonicalNodeEditorHostPath = 'src/host.js';
+const canonicalNodeEditorEditorPath = 'editor/index.html';
 
 export class NodeEditorPluginVerificationError extends Error {
   constructor(message: string) {
@@ -164,17 +165,22 @@ function verifyNodeEditorInstallation(record: NodeEditorVerifiedInstallationReco
     if (!statSync(extractedRoot).isDirectory()) throw new NodeEditorPluginVerificationError('extracted root must be a directory');
     const manifestPath = realpathSync(join(extractedRoot, canonicalNodeEditorManifestPath));
     const hostPath = realpathSync(join(extractedRoot, canonicalNodeEditorHostPath));
+    const editorPath = realpathSync(join(extractedRoot, canonicalNodeEditorEditorPath));
     assertInsideRoot(extractedRoot, manifestPath, 'manifest');
     assertInsideRoot(extractedRoot, hostPath, 'host executable');
+    assertInsideRoot(extractedRoot, editorPath, 'editor entrypoint');
     assertRegularFile(record.packageArchivePath, 'package archive');
     assertRegularFile(manifestPath, 'manifest');
     assertRegularFile(hostPath, 'host executable');
+    assertRegularFile(editorPath, 'editor entrypoint');
     const archiveBytes = readFileSync(record.packageArchivePath);
     const manifestBytes = readFileSync(manifestPath);
     const hostBytes = readFileSync(hostPath);
+    const editorBytes = readFileSync(editorPath);
     if (sha256(archiveBytes) !== record.packageArchiveSha256) throw new NodeEditorPluginVerificationError('package archive SHA-256 mismatch');
     if (sha256(manifestBytes) !== record.manifestSha256) throw new NodeEditorPluginVerificationError('exact manifest-byte SHA-256 mismatch');
     if (sha256(hostBytes) !== record.hostSha256) throw new NodeEditorPluginVerificationError('exact host-executable SHA-256 mismatch');
+    if (sha256(editorBytes) !== record.editorSha256) throw new NodeEditorPluginVerificationError('exact editor-byte SHA-256 mismatch');
     const manifest = validateManifest(JSON.parse(manifestBytes.toString('utf8')));
     if (manifest.pluginId !== record.pluginId) throw new NodeEditorPluginVerificationError('installation plugin id does not match manifest');
     const contribution = manifest.nodeEditors.find(candidate => candidate.id === record.contributionId);
@@ -182,7 +188,7 @@ function verifyNodeEditorInstallation(record: NodeEditorVerifiedInstallationReco
     negotiateProtocol(lineageNodeEditorProtocolSupport, manifest.protocol);
     const negotiated = negotiateProtocol(lineageNodeEditorProtocolSupport, manifest.protocol);
     return {
-      manifest, contribution, installation: { ...record, extractedRoot }, hostPath,
+      manifest, contribution, installation: { ...record, extractedRoot }, hostPath, editorPath,
       protocol: { ...negotiated, capabilities: contribution.requestedCapabilities as Capability[] },
     };
   } catch (error) {

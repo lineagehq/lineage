@@ -16,6 +16,7 @@ export function LineageDetailModal({
   onClearNext,
   onClose,
   onEditOutputTargets,
+  onEditNode,
   onOpenNode,
   onRemoveFromLineage,
   onReplaceNext,
@@ -32,6 +33,7 @@ export function LineageDetailModal({
   onClearNext: () => void;
   onClose: () => void;
   onEditOutputTargets?: () => void;
+  onEditNode?: (node: LineageNode) => void;
   onOpenNode: (assetId: string) => void;
   onRemoveFromLineage: (node: LineageNode) => void;
   onReplaceNext: (node: LineageNode) => void;
@@ -316,6 +318,7 @@ export function LineageDetailModal({
           node={node}
           onClearAllNext={onClearAllNext}
           onClearNext={onClearNext}
+          onEdit={onEditNode}
           onOpenNode={openNode}
           onRemoveFromLineage={onRemoveFromLineage}
           onReplaceNext={onReplaceNext}

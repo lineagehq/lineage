@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +8,7 @@ import test from 'node:test';
 const hostPath = fileURLToPath(new URL('../src/host.js', import.meta.url));
 
 function bootstrap(overrides = {}) {
+  const editorHtml = '<!doctype html><title>verified editor</title>';
   return {
     bootstrap: {
       type: 'bootstrap',
@@ -19,6 +21,8 @@ function bootstrap(overrides = {}) {
     profileId: 'profile-reference-test',
     controlCredential: 'control_reference_test_credential',
     idleTimeoutMs: 250,
+    editorHtmlBase64: Buffer.from(editorHtml).toString('base64'),
+    editorSha256: createHash('sha256').update(editorHtml).digest('hex'),
     ...overrides,
   };
 }
@@ -42,10 +46,15 @@ async function launch(payload = bootstrap()) {
 test('reference host binds loopback, authenticates control, and shuts down when idle', async () => {
   const payload = bootstrap();
   const { child, ready } = await launch(payload);
-  assert.match(ready.origin, /^http:\/\/127\.0\.0\.1:\d+$/);
-  const denied = await fetch(`${ready.origin}/health`);
+  assert.match(ready.controlOrigin, /^http:\/\/127\.0\.0\.1:\d+$/);
+  assert.match(ready.editorOrigin, /^http:\/\/127\.0\.0\.1:\d+$/);
+  assert.notEqual(ready.controlOrigin, ready.editorOrigin);
+  const editor = await fetch(`${ready.editorOrigin}/editor/index.html`);
+  assert.equal(await editor.text(), '<!doctype html><title>verified editor</title>');
+  assert.equal(editor.headers.get('cache-control'), 'no-store');
+  const denied = await fetch(`${ready.controlOrigin}/health`);
   assert.equal(denied.status, 401);
-  const health = await fetch(`${ready.origin}/health`, { headers: { authorization: `Bearer ${payload.controlCredential}` } });
+  const health = await fetch(`${ready.controlOrigin}/health`, { headers: { authorization: `Bearer ${payload.controlCredential}` } });
   assert.equal(health.status, 200);
   assert.deepEqual(await health.json(), { ok: true, pluginId: 'reference.editor', profileId: 'profile-reference-test' });
   const processAuthority = {
@@ -53,11 +62,11 @@ test('reference host binds loopback, authenticates control, and shuts down when 
     expiresAt: Date.now() + 5_000,
     binding: { profileId: 'profile-reference-test', pluginId: 'reference.editor', contributionId: 'reference.editor', processId: payload.bootstrap.processId, sessionId: payload.bootstrap.sessionId, origin: 'https://editor.test.invalid', source: 'process' }
   };
-  const authority = await fetch(`${ready.origin}/authority`, {
+  const authority = await fetch(`${ready.controlOrigin}/authority`, {
     body: JSON.stringify(processAuthority), headers: { authorization: `Bearer ${payload.controlCredential}`, 'content-type': 'application/json' }, method: 'POST'
   });
   assert.equal(authority.status, 204);
-  const replay = await fetch(`${ready.origin}/authority`, {
+  const replay = await fetch(`${ready.controlOrigin}/authority`, {
     body: JSON.stringify(processAuthority), headers: { authorization: `Bearer ${payload.controlCredential}`, 'content-type': 'application/json' }, method: 'POST'
   });
   assert.equal(replay.status, 409);
@@ -83,7 +92,7 @@ test('reference host rejects expired bootstrap before binding', async () => {
 test('reference host rejects an edit authority not bound to its exact bootstrap process and session', async () => {
   const payload = bootstrap({ idleTimeoutMs: 1_000 });
   const { child, ready } = await launch(payload);
-  const response = await fetch(`${ready.origin}/authority`, {
+  const response = await fetch(`${ready.controlOrigin}/authority`, {
     method: 'POST', headers: { authorization: `Bearer ${payload.controlCredential}`, 'content-type': 'application/json' },
     body: JSON.stringify({
       processCapability: 'process_capability_reference_test', expiresAt: Date.now() + 5_000,
@@ -99,7 +108,7 @@ test('reference host accepts exact branded localhost origins and rejects lookali
   for (const [serverOrigin, expectedStatus] of [['http://lineage-dev.localhost:45678', 204], ['http://lineage-dev.localhost.evil:45678', 400]]) {
     const payload = bootstrap({ idleTimeoutMs: 1_000 });
     const { child, ready } = await launch(payload);
-    const response = await fetch(`${ready.origin}/authority`, {
+    const response = await fetch(`${ready.controlOrigin}/authority`, {
       method: 'POST', headers: { authorization: `Bearer ${payload.controlCredential}`, 'content-type': 'application/json' },
       body: JSON.stringify({
         processCapability: 'process_capability_reference_test', expiresAt: Date.now() + 5_000, serverOrigin,

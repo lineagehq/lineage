@@ -8,6 +8,18 @@ const richSeedRoot = process.env.LINEAGE_RICH_SEED_ASSET_ROOT || join(process.cw
 process.env.LINEAGE_E2E_DB = dbPath;
 process.env.LINEAGE_RICH_SEED_ASSET_ROOT = richSeedRoot;
 const promptContractE2e = process.env.LINEAGE_PROMPT_CONTRACTS === '1';
+const extraWebServers = [
+  ['LINEAGE_E2E_FEATURE_OFF_ORIGIN', 'LINEAGE_E2E_FEATURE_OFF_COMMAND'],
+  ['LINEAGE_E2E_EXPIRY_ORIGIN', 'LINEAGE_E2E_EXPIRY_COMMAND'],
+] as const;
+const webServers = [{
+  command: `PORT=${port} HOST=127.0.0.1 LINEAGE_E2E_PORT=${port} LINEAGE_DB=${dbPath} LINEAGE_RICH_SEED_ASSET_ROOT=${richSeedRoot} npm run dev`,
+  timeout: 120_000,
+  url: `http://127.0.0.1:${port}/api/projects`,
+  reuseExistingServer: false,
+}, ...extraWebServers.flatMap(([originName, commandName]) => process.env[originName] && process.env[commandName] ? [{
+  command: process.env[commandName]!, timeout: 120_000, url: `${process.env[originName]}/api/projects`, reuseExistingServer: false,
+}] : [])];
 
 export default defineConfig({
   testDir: './e2e',
@@ -31,10 +43,5 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
-  webServer: {
-    command: `PORT=${port} HOST=127.0.0.1 LINEAGE_E2E_PORT=${port} LINEAGE_DB=${dbPath} LINEAGE_RICH_SEED_ASSET_ROOT=${richSeedRoot} npm run dev`,
-    timeout: 120_000,
-    url: `http://127.0.0.1:${port}/api/projects`,
-    reuseExistingServer: false,
-  },
+  webServer: webServers,
 });

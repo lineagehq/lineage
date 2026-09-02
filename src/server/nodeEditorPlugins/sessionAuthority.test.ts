@@ -54,4 +54,17 @@ describe('node editor session authority', () => {
     now = 211;
     expect(() => authority.authorizeProcess(expiring.launch.sessionId, expiring.processCapability, expiring.processBinding)).toThrow(/expired/);
   });
+
+  it('binds browser authority to the controller origin independently of process runtime origin', () => {
+    const authority = new NodeEditorSessionAuthority();
+    const created = authority.create({
+      profileId: 'profile-a', pluginId: 'reference.editor', contributionId: 'reference.editor',
+      origin: 'http://lineage-dev.localhost:5197', processOrigin: 'http://127.0.0.1:62000',
+    });
+    const { cookie } = authority.exchange({ sessionId: created.launch.sessionId, launchCredential: created.launch.launchCredential, binding: created.launch.binding });
+    expect(created.launch.binding.origin).toBe('http://lineage-dev.localhost:5197');
+    expect(created.processBinding.origin).toBe('http://127.0.0.1:62000');
+    expect(() => authority.authorizeCookie(created.launch.sessionId, cookie, created.processBinding.origin)).toThrow(/origin/);
+    expect(() => authority.authorizeProcess(created.launch.sessionId, created.processCapability, created.processBinding)).not.toThrow();
+  });
 });

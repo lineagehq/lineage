@@ -1,4 +1,4 @@
-import { expect, test } from 'playwright/test';
+import { expect, test, type Page } from 'playwright/test';
 
 const project = 'demo-project';
 const firstRoot = 'demo-meta-short-form-upload-demo-post-static';
@@ -6,6 +6,23 @@ const secondRoot = 'demo-linkedin-ledger-catalog-shared';
 let firstWorkspaceId = '';
 let secondWorkspaceId = '';
 const cleanupProjects = new Map<string, string>();
+
+async function revealProject(page: Page, displayName: string) {
+  const projectItem = page.locator('.organization-item').filter({ hasText: displayName });
+  const pageState = page.getByText(/^Page \d+ of \d+$/);
+  for (let pageNumber = 0; pageNumber < 20; pageNumber += 1) {
+    if (await projectItem.count() > 0) {
+      await expect(projectItem).toBeVisible();
+      return projectItem;
+    }
+    const next = page.getByRole('button', { name: 'Next' });
+    await expect(next).toBeEnabled();
+    const priorState = await pageState.textContent();
+    await next.click();
+    await expect(pageState).not.toHaveText(priorState || '');
+  }
+  throw new Error(`Project ${displayName} was not present in the observable collection pages`);
+}
 
 test.beforeAll(async ({ request }) => {
   const first = await request.post('/api/lineage-workspaces', {
@@ -124,10 +141,11 @@ test('keeps explicit Swissifier deletion suppressed until Restore demo', async (
   expect(deleted.ok()).toBe(true);
 
   await page.goto('/projects');
-  await expect(page.locator('.organization-item').filter({ hasText: 'swissifier-demo' })).toHaveCount(0);
   const restore = page.getByRole('button', { name: 'Restore demo' });
   await expect(restore).toBeVisible();
+  await expect(page.locator('.organization-item').filter({ hasText: 'swissifier-demo' })).toHaveCount(0);
   await page.reload();
+  await expect(restore).toBeVisible();
   await expect(page.locator('.organization-item').filter({ hasText: 'swissifier-demo' })).toHaveCount(0);
   await restore.click();
 
@@ -224,6 +242,7 @@ test('keeps collection ordering accessible, responsive, animated, and durable', 
   }))).toEqual({ documentWidth: 320, viewportWidth: 320 });
 
   const target = created[1];
+  await revealProject(page, target.displayName);
   const handle = () => page.getByRole('button', { name: `Reorder ${target.displayName}` });
   await handle().press('Space');
   await handle().press('Home');
@@ -299,8 +318,7 @@ test('creates a project and completes workspace archive, restore, and permanent 
   await expect(createButton).toBeFocused();
   await expect(page.locator('.organization-item').filter({ hasText: createdProject.displayName })).toBeVisible();
   await page.reload();
-  await page.getByRole('button', { name: 'Next' }).click();
-  await expect(page.locator('.organization-item').filter({ hasText: createdProject.displayName })).toBeVisible();
+  await revealProject(page, createdProject.displayName);
 
   const lifecycleRoot = 'demo-linkedin-upload-demo-done-static-grounded-v2';
   const lifecycleTitle = 'Lifecycle proof workspace';

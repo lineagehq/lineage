@@ -15,6 +15,7 @@ export function LineageAttemptHistoryModal({
     canRemoveFromLineage: boolean;
     onClearAllNext: () => void;
     onClearNext: () => void;
+    onEdit?: (node: LineageNode) => void;
     onOpenNode: (assetId: string) => void;
     onRemoveFromLineage: (node: LineageNode) => void;
     onReplaceNext: (node: LineageNode) => void;
@@ -107,6 +108,11 @@ export function LineageAttemptHistoryModal({
                       {attempt.file_path && <div><dt>File</dt><dd>{attempt.file_path}</dd></div>}
                       {attempt.generation_job_id && <div><dt>Job</dt><dd>{attempt.generation_job_id}</dd></div>}
                       {attempt.prompt && <div><dt>Prompt</dt><dd>{attempt.prompt}</dd></div>}
+                      {attempt.editor_provenance && <>
+                        <div><dt>Editor</dt><dd>{attempt.editor_provenance.plugin_id} · {attempt.editor_provenance.package_version}</dd></div>
+                        <div><dt>Edit summary</dt><dd>{attempt.editor_provenance.edit_summary}</dd></div>
+                        <div><dt>Protocol</dt><dd>{attempt.editor_provenance.protocol}</dd></div>
+                      </>}
                       <div><dt>Created</dt><dd>{attempt.created_at}</dd></div>
                     </dl>
                   </div>
@@ -134,6 +140,7 @@ export function LineageAttemptHistoryModal({
             node={node}
             onClearAllNext={actions.onClearAllNext}
             onClearNext={actions.onClearNext}
+            onEdit={actions.onEdit}
             onOpenNode={actions.onOpenNode}
             onRemoveFromLineage={actions.onRemoveFromLineage}
             onReplaceNext={actions.onReplaceNext}

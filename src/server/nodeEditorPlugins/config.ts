@@ -43,7 +43,7 @@ function digest(value: unknown, label: string): string {
 
 function parseInstallation(value: unknown, index: number): NodeEditorVerifiedInstallationRecord {
   if (!isRecord(value)) throw new NodeEditorPluginConfigError(`installations[${index}] must be an object`);
-  exactKeys(value, ['schemaVersion', 'pluginId', 'contributionId', 'packageArchivePath', 'packageArchiveSha256', 'manifestSha256', 'extractedRoot', 'hostSha256'], `installations[${index}]`);
+  exactKeys(value, ['schemaVersion', 'pluginId', 'contributionId', 'packageArchivePath', 'packageArchiveSha256', 'manifestSha256', 'extractedRoot', 'hostSha256', 'editorSha256'], `installations[${index}]`);
   if (value.schemaVersion !== 1) throw new NodeEditorPluginConfigError(`installations[${index}].schemaVersion must be 1`);
   return {
     schemaVersion: 1,
@@ -54,6 +54,7 @@ function parseInstallation(value: unknown, index: number): NodeEditorVerifiedIns
     manifestSha256: digest(value.manifestSha256, `installations[${index}].manifestSha256`),
     extractedRoot: resolve(nonEmptyString(value.extractedRoot, `installations[${index}].extractedRoot`)),
     hostSha256: digest(value.hostSha256, `installations[${index}].hostSha256`),
+    editorSha256: digest(value.editorSha256, `installations[${index}].editorSha256`),
   };
 }
 

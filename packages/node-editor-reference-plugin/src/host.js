@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual } from 'node:crypto';
 import { createReadStream, writeSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
@@ -34,7 +34,7 @@ export async function readOneBootstrap(fd = 3) {
   const lines = body.split('\n').filter(line => line.trim() !== '');
   if (lines.length !== 1) throw new Error('bootstrap must be supplied exactly once');
   const payload = JSON.parse(lines[0]);
-  if (!payload || typeof payload !== 'object' || Object.keys(payload).sort().join(',') !== 'bootstrap,controlCredential,idleTimeoutMs,profileId') {
+  if (!payload || typeof payload !== 'object' || Object.keys(payload).sort().join(',') !== 'bootstrap,controlCredential,editorHtmlBase64,editorSha256,idleTimeoutMs,profileId') {
     throw new Error('invalid private bootstrap envelope');
   }
   const bootstrap = payload.bootstrap;
@@ -55,6 +55,7 @@ export async function readOneBootstrap(fd = 3) {
   if (!Number.isInteger(payload.idleTimeoutMs) || payload.idleTimeoutMs < 25 || payload.idleTimeoutMs > 300_000) {
     throw new Error('invalid idle timeout');
   }
+  if (typeof payload.editorHtmlBase64 !== 'string' || payload.editorHtmlBase64.length < 16 || typeof payload.editorSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(payload.editorSha256)) throw new Error('invalid verified editor bytes');
   return payload;
 }
 
@@ -62,40 +63,10 @@ export async function runReferenceHost({ bootstrapFd = 3 } = {}) {
   const payload = await readOneBootstrap(bootstrapFd);
   // Consuming the inherited stream is the only bootstrap exchange. The bootstrap credential is never used as control authority.
   const { bootstrap, controlCredential, idleTimeoutMs, profileId } = payload;
+  const editorHtml = Buffer.from(payload.editorHtmlBase64, 'base64');
   let idleTimer;
   let closing = false;
   let processAuthority;
-  let terminalObservation;
-  const runEditJourney = async authority => {
-    if (!authority.serverOrigin) return;
-    const binding = authority.binding;
-    const wireBinding = { pluginId: binding.pluginId, processId: binding.processId, sessionId: binding.sessionId, origin: binding.origin, source: 'process' };
-    const protocol = async body => {
-      const response = await fetch(`${authority.serverOrigin}/api/node-editor-plugins/sessions/${binding.sessionId}/protocol`, {
-        method: 'POST', headers: { authorization: `Bearer ${authority.processCapability}`, 'content-type': 'application/json' }, body: JSON.stringify(body),
-      });
-      if (!response.ok) throw new Error(`protocol request failed (${response.status})`);
-      return response.json();
-    };
-    const read = await protocol({ type: 'document.read', requestId: 'reference-read', binding: wireBinding });
-    if (read.type !== 'document.result') throw new Error(`document.read failed: ${read.code || read.type}`);
-    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
-    const checksumSha256 = createHash('sha256').update(bytes).digest('hex');
-    const proposalId = `proposal-${binding.sessionId.slice(-24)}`;
-    const created = await protocol({
-      type: 'proposal.create', requestId: 'reference-proposal', binding: wireBinding,
-      header: { proposalId, idempotencyKey: `idem-${binding.sessionId.slice(-24)}`, baseRevision: read.revision, baseChecksum: read.checksum },
-      document: { baseAttemptId: read.document.baseAttemptId, mimeType: 'image/png', sizeBytes: bytes.length, checksumSha256, editSummary: 'Reference process streamed edit' },
-    });
-    if (created.type !== 'proposal.result' || created.status !== 'pending') throw new Error(`proposal.create failed: ${created.code || created.type}`);
-    const upload = await fetch(`${authority.serverOrigin}/api/node-editor-plugins/sessions/${binding.sessionId}/proposals/${proposalId}/content`, {
-      method: 'PUT', headers: { authorization: `Bearer ${authority.processCapability}`, 'content-type': 'application/octet-stream' }, body: bytes,
-    });
-    if (!upload.ok) throw new Error(`proposal upload failed (${upload.status})`);
-    const result = await upload.json();
-    if (!['accepted', 'stale'].includes(result?.outcome?.outcome)) throw new Error('terminal outcome was not observed');
-    terminalObservation = result.outcome;
-  };
   const server = createServer((request, response) => {
     const presented = request.headers.authorization?.startsWith('Bearer ') ? request.headers.authorization.slice(7) : '';
     if (!tokenMatches(presented, controlCredential)) {
@@ -105,7 +76,7 @@ export async function runReferenceHost({ bootstrapFd = 3 } = {}) {
     }
     if (request.method === 'GET' && request.url === '/health') {
       response.writeHead(200, { 'content-type': 'application/json' });
-      response.end(`${JSON.stringify({ ok: true, pluginId: bootstrap.pluginId, profileId, terminalObservation })}\n`);
+      response.end(`${JSON.stringify({ ok: true, pluginId: bootstrap.pluginId, profileId })}\n`);
       return;
     }
     if (request.method === 'POST' && request.url === '/authority') {
@@ -134,8 +105,6 @@ export async function runReferenceHost({ bootstrapFd = 3 } = {}) {
           processAuthority = authority;
           response.writeHead(204);
           response.end();
-          void new Promise(resolve => setTimeout(resolve, 50)).then(() => runEditJourney(authority))
-            .catch(error => { terminalObservation = { outcome: 'error', message: error.message }; });
         } catch {
           response.writeHead(400, { 'content-type': 'application/json' });
           response.end('{"error":"invalid_authority"}\n');
@@ -147,7 +116,21 @@ export async function runReferenceHost({ bootstrapFd = 3 } = {}) {
       closing = true;
       response.writeHead(202, { 'content-type': 'application/json' });
       response.end('{"ok":true}\n');
-      setImmediate(() => server.close());
+      setImmediate(() => { server.close(); editorServer.close(); });
+      return;
+    }
+    response.writeHead(404, { 'content-type': 'application/json' });
+    response.end('{"error":"not_found"}\n');
+  });
+  const editorServer = createServer((request, response) => {
+    if (request.method === 'GET' && request.url === '/editor/index.html') {
+      response.writeHead(200, {
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'no-store',
+        'content-security-policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-ancestors http://127.0.0.1:* http://*.localhost:*",
+        'x-content-type-options': 'nosniff',
+      });
+      response.end(editorHtml);
       return;
     }
     response.writeHead(404, { 'content-type': 'application/json' });
@@ -157,13 +140,21 @@ export async function runReferenceHost({ bootstrapFd = 3 } = {}) {
     server.once('error', reject);
     server.listen(0, '127.0.0.1', resolve);
   });
+  await new Promise((resolve, reject) => {
+    editorServer.once('error', reject);
+    editorServer.listen(0, '127.0.0.1', resolve);
+  });
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('reference host did not bind a TCP port');
-  const origin = `http://127.0.0.1:${address.port}`;
-  writeSync(bootstrapFd, `${JSON.stringify({ type: 'host.ready', origin, pluginId: bootstrap.pluginId, profileId })}\n`);
+  const editorAddress = editorServer.address();
+  if (!editorAddress || typeof editorAddress === 'string') throw new Error('reference editor did not bind a TCP port');
+  const controlOrigin = `http://127.0.0.1:${address.port}`;
+  const editorOrigin = `http://127.0.0.1:${editorAddress.port}`;
+  writeSync(bootstrapFd, `${JSON.stringify({ type: 'host.ready', controlOrigin, editorOrigin, pluginId: bootstrap.pluginId, profileId })}\n`);
   idleTimer = setTimeout(() => {
     closing = true;
     server.close();
+    editorServer.close();
   }, idleTimeoutMs);
   idleTimer.unref();
   await new Promise((resolve, reject) => {

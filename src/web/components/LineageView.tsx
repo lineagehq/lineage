@@ -46,6 +46,7 @@ import { LineageContextMenu } from './LineageContextMenu';
 import { activeNodeIdAfterRefresh } from './lineageRefreshState';
 import { LineageAttemptHistoryModal } from './LineageAttemptHistoryModal';
 import { LineageDetailModal } from './LineageDetailModal';
+import { NodeEditorSessionDialog } from './NodeEditorSessionDialog';
 import { LineageEdgeSummaryDialog, type EdgeSummaryEditAction } from './LineageEdgeSummaryDialog';
 import { LineageNewWorkspaceModal } from './LineageNewWorkspaceModal';
 import { LineageReplayControls } from './LineageReplayControls';
@@ -175,9 +176,26 @@ export function LineageView({
   const [targetNodeId, setTargetNodeId] = useState<string | null>(null);
   const [historyNodeId, setHistoryNodeId] = useState<string | null>(null);
   const [historyAttempts, setHistoryAttempts] = useState<LineageAttempt[]>([]);
+  const [editorNodeId, setEditorNodeId] = useState<string | null>(null);
+  const [editorEligibleNodeIds, setEditorEligibleNodeIds] = useState<Set<string>>(() => new Set());
   const [hoverPreviewsEnabled, setHoverPreviewsEnabled] = useState(readHoverPreviewsEnabled);
   const [variationPromptAutoEdit, setVariationPromptAutoEdit] = useState(readVariationPromptAutoEdit);
   const [branchPromptOnMark, setBranchPromptOnMark] = useState(readBranchPromptOnMark);
+
+  useEffect(() => {
+    if (!snapshot) { setEditorEligibleNodeIds(new Set()); return; }
+    const abort = new AbortController();
+    void Promise.all(snapshot.nodes.map(async node => {
+      const query = new URLSearchParams({ project, rootAssetId: snapshot.root_asset_id, nodeAssetId: node.asset_id });
+      try {
+        const response = await fetch(`/api/node-editor-plugins?${query}`, { signal: abort.signal });
+        if (!response.ok) return undefined;
+        const body = await response.json() as { plugins?: Array<{ eligible?: boolean }> };
+        return body.plugins?.some(plugin => plugin.eligible === true) ? node.asset_id : undefined;
+      } catch { return undefined; }
+    })).then(ids => { if (!abort.signal.aborted) setEditorEligibleNodeIds(new Set(ids.filter((id): id is string => Boolean(id)))); });
+    return () => abort.abort();
+  }, [project, snapshot]);
   const [rerollPromptOnMark, setRerollPromptOnMark] = useState(readRerollPromptOnMark);
   const [discussionNotePrompt, setDiscussionNotePrompt] = useState(readDiscussionNotePrompt);
   const [previewActions, setPreviewActions] = useState(readLineagePreviewActions);
@@ -1608,6 +1626,7 @@ export function LineageView({
             canRemoveFromLineage: historyNode.asset_id !== snapshot.root_asset_id,
             onClearAllNext: () => void clearNextVariation(),
             onClearNext: () => void clearNextVariation(historyNode.asset_id),
+            onEdit: editorEligibleNodeIds.has(historyNode.asset_id) ? node => { closeAttemptHistory(); setEditorNodeId(node.asset_id); } : undefined,
             onOpenNode: openDetailFromHistory,
             onRemoveFromLineage: node => void removeNodeFromLineage(node),
             onReplaceNext: node => void requestBranchAction(node, 'replace'),
@@ -1625,7 +1644,8 @@ export function LineageView({
           project={project}
         />
       )}
-      {detailNode && snapshot && <LineageDetailModal canRemoveFromLineage={detailNode.asset_id !== snapshot.root_asset_id} node={detailNode} onClearAllNext={() => void clearNextVariation()} onClearNext={() => void clearNextVariation(detailNode.asset_id)} onClose={() => setDetailNodeId(null)} onEditOutputTargets={() => setTargetNodeId(detailNode.asset_id)} onOpenNode={setDetailNodeId} onRemoveFromLineage={node => void removeNodeFromLineage(node)} onReplaceNext={node => void requestBranchAction(node, 'replace')} onReview={markReview} onSelectNext={node => void requestBranchAction(node, 'add')} onToast={onToast} selectedCount={selectedNodes.length} selectionFull={selectionFull} snapshot={snapshot} />}
+      {detailNode && snapshot && <LineageDetailModal canRemoveFromLineage={detailNode.asset_id !== snapshot.root_asset_id} node={detailNode} onClearAllNext={() => void clearNextVariation()} onClearNext={() => void clearNextVariation(detailNode.asset_id)} onClose={() => setDetailNodeId(null)} onEditNode={editorEligibleNodeIds.has(detailNode.asset_id) ? node => { setDetailNodeId(null); setEditorNodeId(node.asset_id); } : undefined} onEditOutputTargets={() => setTargetNodeId(detailNode.asset_id)} onOpenNode={setDetailNodeId} onRemoveFromLineage={node => void removeNodeFromLineage(node)} onReplaceNext={node => void requestBranchAction(node, 'replace')} onReview={markReview} onSelectNext={node => void requestBranchAction(node, 'add')} onToast={onToast} selectedCount={selectedNodes.length} selectionFull={selectionFull} snapshot={snapshot} />}
+      {editorNodeId && snapshot && snapshot.nodes.find(node => node.asset_id === editorNodeId) && <NodeEditorSessionDialog node={snapshot.nodes.find(node => node.asset_id === editorNodeId)!} project={project} rootAssetId={snapshot.root_asset_id} onClose={() => setEditorNodeId(null)} onAccepted={async () => { await refresh({ quiet: true }); if (historyNodeId === editorNodeId) await openAttemptHistory(editorNodeId); }} />}
       {targetNode && snapshot && (
         <NodeNextOutputTargetsEditor
           nodeAssetId={targetNode.asset_id}

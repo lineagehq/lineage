@@ -11,7 +11,7 @@
       "default": "./src/index.js"
     }
   },
-  "files": ["README.md", "manifest.json", "src"],
+  "files": ["README.md", "manifest.json", "src", "editor"],
   "lineage": {
     "nodeEditorHost": "src/host.js",
     "nodeEditorManifest": "manifest.json"

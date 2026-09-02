@@ -398,6 +398,17 @@ function taskBackedRerollRequest(project: string, rootAssetId: string, task: Lin
 }
 
 function attemptFrom(row: Record<string, unknown>): LineageAttempt {
+  let editorProvenance: LineageAttempt['editor_provenance'];
+  if (row.editor_plugin_id) {
+    let summary: string;
+    try { summary = String((JSON.parse(String(row.editor_edit_summary_json || '{}')) as { summary?: string }).summary || ''); } catch { summary = ''; }
+    editorProvenance = {
+      plugin_id: String(row.editor_plugin_id), contribution_id: String(row.editor_contribution_id),
+      package_name: String(row.editor_package_name), package_version: String(row.editor_package_version),
+      protocol: `${Number(row.editor_protocol_major)}.${Number(row.editor_protocol_minor)}`,
+      edit_summary: summary, accepted_at: String(row.editor_accepted_at),
+    };
+  }
   return {
     id: String(row.id),
     project_id: String(row.project_id),
@@ -412,6 +423,7 @@ function attemptFrom(row: Record<string, unknown>): LineageAttempt {
     created_at: String(row.created_at),
     promoted_at: rowString(row.promoted_at),
     is_current: Boolean(Number(row.is_current)),
+    ...(editorProvenance ? { editor_provenance: editorProvenance } : {}),
   };
 }
 
@@ -684,7 +696,12 @@ export function getLineageSnapshot(project: string, assetId: string): LineageSna
     where a.project_id = ? and a.id in (${placeholders})
   `).all(root, project, ...ids) as unknown as Array<Omit<LineageNode, 'attempt_count' | 'branch_prompt' | 'current_attempt' | 'is_latest' | 'lineage_tasks' | 'position' | 'preview_url' | 'reroll_request' | 'selection_note' | 'user_selected'> & { asset_created_at?: string; layout_x?: number; layout_y?: number }>;
   const attemptRows = ids.length > 0
-    ? database.prepare(`select * from asset_attempts where project_id = ? and node_asset_id in (${placeholders}) order by node_asset_id, attempt_index desc`).all(project, ...ids) as Array<Record<string, unknown>>
+    ? database.prepare(`select aa.*, p.plugin_id editor_plugin_id, p.contribution_id editor_contribution_id,
+        p.plugin_package_name editor_package_name, p.plugin_package_version editor_package_version,
+        p.protocol_major editor_protocol_major, p.protocol_minor editor_protocol_minor,
+        p.edit_summary_json editor_edit_summary_json, p.accepted_at editor_accepted_at
+      from asset_attempts aa left join node_editor_attempt_provenance p on p.attempt_id = aa.id
+      where aa.project_id = ? and aa.node_asset_id in (${placeholders}) order by aa.node_asset_id, aa.attempt_index desc`).all(project, ...ids) as Array<Record<string, unknown>>
     : [];
   const attemptsByNode = new Map<string, LineageAttempt[]>();
   for (const attempt of attemptRows.map(attemptFrom)) {
@@ -956,9 +973,13 @@ export function getLineageAttempts(project: string, rootAssetId: string, nodeAss
   try {
     assertNodeInRoot(database, project, rootAssetId, nodeAssetId);
     const rows = database.prepare(`
-      select * from asset_attempts
-      where project_id = ? and node_asset_id = ?
-      order by attempt_index desc, created_at desc
+      select aa.*, p.plugin_id editor_plugin_id, p.contribution_id editor_contribution_id,
+        p.plugin_package_name editor_package_name, p.plugin_package_version editor_package_version,
+        p.protocol_major editor_protocol_major, p.protocol_minor editor_protocol_minor,
+        p.edit_summary_json editor_edit_summary_json, p.accepted_at editor_accepted_at
+      from asset_attempts aa left join node_editor_attempt_provenance p on p.attempt_id = aa.id
+      where aa.project_id = ? and aa.node_asset_id = ?
+      order by aa.attempt_index desc, aa.created_at desc
     `).all(project, nodeAssetId) as Array<Record<string, unknown>>;
     const asset = database.prepare('select id asset_id, project_id project, local_path, checksum_sha256, created_at asset_created_at from assets where project_id = ? and id = ?').get(project, nodeAssetId) as { asset_id: string; project: string; local_path?: string; checksum_sha256?: string; asset_created_at?: string };
     return { project, root_asset_id: rootAssetId, node_asset_id: nodeAssetId, attempts: withImplicitAttempt(rows.map(attemptFrom), asset), fetchedAt: nowIso() };

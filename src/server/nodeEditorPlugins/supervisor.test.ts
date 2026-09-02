@@ -11,6 +11,7 @@ import { NodeEditorPluginSupervisor } from './supervisor';
 
 const scratch = join(repoRoot, '.asset-scratch', 'vitest-node-editor-supervisor');
 const referenceHostPath = join(repoRoot, 'packages', 'node-editor-reference-plugin', 'src', 'host.js');
+const referenceEditorPath = join(repoRoot, 'packages', 'node-editor-reference-plugin', 'editor', 'index.html');
 const supervisors: NodeEditorPluginSupervisor[] = [];
 const sha256 = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex');
 const referenceManifest = positiveFixtures[0].value as PluginManifest;
@@ -22,10 +23,13 @@ function registry(name: string): { registry: NodeEditorPluginRegistry; record: N
   const archivePath = join(scratch, name, 'plugin.tgz');
   const manifestBytes = `${JSON.stringify(referenceManifest)}\n`;
   const hostBytes = readFileSync(referenceHostPath);
+  const editorBytes = readFileSync(referenceEditorPath);
   const archiveBytes = Buffer.from(`archive-${name}`);
   mkdirSync(join(root, 'src'), { recursive: true });
+  mkdirSync(join(root, 'editor'), { recursive: true });
   writeFileSync(manifestPath, manifestBytes);
   writeFileSync(hostPath, hostBytes);
+  writeFileSync(join(root, 'editor', 'index.html'), editorBytes);
   writeFileSync(archivePath, archiveBytes);
   const record: NodeEditorVerifiedInstallationRecord = {
     schemaVersion: 1,
@@ -36,6 +40,7 @@ function registry(name: string): { registry: NodeEditorPluginRegistry; record: N
     manifestSha256: sha256(manifestBytes),
     extractedRoot: root,
     hostSha256: sha256(hostBytes),
+    editorSha256: sha256(editorBytes),
   };
   const config: NodeEditorPluginConfig = { schemaVersion: 1, experimentalEnabled: true, installations: [record] };
   return { registry: new NodeEditorPluginRegistry(config), record };

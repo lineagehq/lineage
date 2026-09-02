@@ -330,6 +330,15 @@ export interface LineageAttempt {
   created_at: string;
   promoted_at?: string;
   is_current: boolean;
+  editor_provenance?: {
+    plugin_id: string;
+    contribution_id: string;
+    package_name: string;
+    package_version: string;
+    protocol: string;
+    edit_summary: string;
+    accepted_at: string;
+  };
 }
 
 export interface LineageRerollRequest {

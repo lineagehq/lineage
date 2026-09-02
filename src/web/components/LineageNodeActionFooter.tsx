@@ -7,6 +7,7 @@ export function LineageNodeActionFooter({
   node,
   onClearAllNext,
   onClearNext,
+  onEdit,
   onOpenNode,
   onRemoveFromLineage,
   onReplaceNext,
@@ -21,6 +22,7 @@ export function LineageNodeActionFooter({
   node: LineageNode;
   onClearAllNext: () => void;
   onClearNext: () => void;
+  onEdit?: (node: LineageNode) => void;
   onOpenNode: (assetId: string) => void;
   onRemoveFromLineage: (node: LineageNode) => void;
   onReplaceNext: (node: LineageNode) => void;
@@ -53,6 +55,7 @@ export function LineageNodeActionFooter({
   return (
     <footer className="lineage-node-actions">
       <div className="lineage-node-actions-primary">
+        {onEdit && <button className="primary-lite" onClick={() => onEdit(node)} type="button">Edit</button>}
         <button aria-label={node.user_selected ? `Remove ${node.title} from next variation` : `Use ${node.title} for next variation`} className="primary-lite" disabled={!node.user_selected && selectionFull} onClick={() => node.user_selected ? onClearNext() : onSelectNext(node)} type="button">
           {nextBaseLabel}
         </button>

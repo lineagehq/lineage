@@ -1,6 +1,6 @@
 {
   "name": "@mean-weasel/lineage",
-  "version": "0.1.35",
+  "version": "0.1.36",
   "description": "Local-first creative lineage workspace",
   "license": "MIT",
   "type": "module",
@@ -107,12 +107,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/mean-weasel/lineage.git"
+    "url": "git+https://github.com/lineagehq/lineage.git"
   },
   "bugs": {
-    "url": "https://github.com/mean-weasel/lineage/issues"
+    "url": "https://github.com/lineagehq/lineage/issues"
   },
-  "homepage": "https://github.com/mean-weasel/lineage#readme",
+  "homepage": "https://github.com/lineagehq/lineage#readme",
   "publishConfig": {
     "access": "public"
   }

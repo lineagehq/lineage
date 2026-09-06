@@ -1548,7 +1548,10 @@ describe('lineage CLI handoff commands', () => {
 
   it('keeps package docs aligned with claim-aware mutating command contracts', () => {
     const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8');
-    const operator = readFileSync(join(repoRoot, 'plugins/lineage-codex-plugin/skills/lineage-package-operator/SKILL.md'), 'utf8');
+    const skillRoot = join(repoRoot, 'plugins/lineage-codex-plugin/skills/lineage-package-operator');
+    const router = readFileSync(join(skillRoot, 'SKILL.md'), 'utf8');
+    expect(router).toContain('(references/claims.md)');
+    const operator = [router, readFileSync(join(skillRoot, 'references/claims.md'), 'utf8')].join('\n');
 
     expect(readme).toContain('lineage agent claim --project demo-project --scope lineage_workspace');
     expect(readme).toContain('lineage link-child --project demo-project --root <root-asset-id> --child <child-asset-id> --summary "Cleaner type" --claim-token "$LINEAGE_CLAIM_TOKEN" --confirm-write --json');
@@ -1560,14 +1563,14 @@ describe('lineage CLI handoff commands', () => {
     expect(readme).toContain('lineage reroll mark --project demo-project --root <root-asset-id> --target <target-asset-id> --notes "Fix distorted text" --confirm-write --json');
     expect(readme).toContain('lineage reroll cancel --project demo-project --root <root-asset-id> --target <target-asset-id> --confirm-write --json');
     expect(operator).toContain('`reroll mark`');
-    expect(operator).toContain('Never replace `--profile` with a direct `--db` write');
+    expect(operator.replace(/\s+/g, ' ')).toMatch(/never replace it with a direct `--db` write/i);
     expect(operator).not.toContain('--db /absolute/path/to/lineage.sqlite');
     expect(readme).toContain('`lineage link-child` creates a new visible descendant');
     expect(readme).toContain('one- or two-word description of the change from parent to child');
     expect(readme).toContain('`lineage reroll import` updates the target node');
     expect(operator).toContain('Use `reroll mark`, `reroll');
     expect(readme).toContain('Use `project_channel` only for rare work');
-    expect(operator).toContain('Persistent writes require the profile writer lease');
+    expect(operator.replace(/\s+/g, ' ')).toMatch(/Persistent writes require a named profile pinned to verified code, the profile writer lease/);
   });
 
   it('keeps the documented managed development setup build-complete', () => {
@@ -1612,9 +1615,13 @@ describe('lineage CLI handoff commands', () => {
   it('documents the one-time fresh-profile bootstrap exception consistently', () => {
     const agents = readFileSync(join(repoRoot, 'AGENTS.md'), 'utf8');
     const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8');
-    const operator = readFileSync(join(repoRoot, 'plugins/lineage-codex-plugin/skills/lineage-package-operator/SKILL.md'), 'utf8');
+    const skillRoot = join(repoRoot, 'plugins/lineage-codex-plugin/skills/lineage-package-operator');
+    const operator = readFileSync(join(skillRoot, 'SKILL.md'), 'utf8');
+    const runtime = readFileSync(join(skillRoot, 'references/runtime-profiles.md'), 'utf8');
 
-    for (const text of [agents, readme, operator]) {
+    expect(agents).toContain('(plugins/lineage-codex-plugin/skills/lineage-package-operator/SKILL.md)');
+    expect(operator).toContain('(references/runtime-profiles.md)');
+    for (const text of [readme, runtime]) {
       expect(text).toContain('Fresh-profile bootstrap exception');
       expect(text).toContain('runtime doctor');
       expect(text).toContain('profile init');

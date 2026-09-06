@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.1.36
+
+- Make agent guidance task-specific: preserve runtime and data safeguards while removing redundant approval, setup, and verification requirements for ordinary work.
+- Split the Codex operator skill into five packaged workflow references, with coverage, routing, and installed-file integrity checks.
+- Refresh audited repository dependencies and pin the fixed qs parser for repository installs without changing Express major versions.
+- Point the landing page, documentation, and About links at the Lineage custom domain.
+
 ## 0.1.35
 
 - Redesign Canvas-to-Workspaces navigation and contextual controls so destinations and actions read clearly across desktop and mobile layouts.

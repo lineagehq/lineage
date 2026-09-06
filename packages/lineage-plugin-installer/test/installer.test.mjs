@@ -367,6 +367,11 @@ test("packPlugin dry-run validates artifact contents without writing dist files"
     ".codex-plugin/plugin.json",
     "README.md",
     "package.json",
+    "skills/lineage-package-operator/references/claims.md",
+    "skills/lineage-package-operator/references/cloning-migration.md",
+    "skills/lineage-package-operator/references/image-generation.md",
+    "skills/lineage-package-operator/references/runtime-profiles.md",
+    "skills/lineage-package-operator/references/services-upgrades.md",
     "skills/lineage-package-operator/SKILL.md",
   ]);
   await assert.rejects(readFile(path.resolve("dist-test-should-not-exist", `lineage-codex-plugin-${releaseFixtureVersion}.tgz`)));

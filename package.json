@@ -52,7 +52,7 @@
     "seed:qa:verify": "node scripts/qa-seed-verify.mjs",
     "ci": "npm run check && npm run lint && npm run test && npm run release:policy:test && npm run docs:check && npm run knip && npm run build && npm run pages:check && npm run onboarding:smoke && npm run runtime:smoke && npm run runtime:oracle && npm run stable-upgrade:smoke && npm run e2e && npm run public:readiness && npm run package:smoke && npm run plugin:smoke && npm run audit",
     "plugin:pack": "node scripts/plugin-release.mjs --out-dir dist/lineage-plugin --json",
-    "plugin:smoke": "node scripts/plugin-release.mjs && npm test --prefix packages/lineage-plugin-installer && npm run check --prefix packages/lineage-plugin-installer",
+    "plugin:smoke": "node --test scripts/plugin-guidance.test.mjs && node scripts/plugin-release.mjs && npm test --prefix packages/lineage-plugin-installer && npm run check --prefix packages/lineage-plugin-installer",
     "plugin:codex-smoke": "node packages/lineage-plugin-installer/scripts/codex-smoke.mjs",
     "prepare-release": "node scripts/prepare-release.mjs",
     "release": "node scripts/release.mjs",

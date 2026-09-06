@@ -4,6 +4,8 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { inspectPluginGuidance } from './plugin-guidance.mjs';
+
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const filesToScan = [
   'AGENTS.md',
@@ -30,6 +32,7 @@ const filesToScan = [
   'plugins/lineage-codex-plugin',
   'packages/lineage-plugin-installer',
   '.agents/plugins/marketplace.json',
+  '.agents/references',
 ];
 
 const privatePatterns = [
@@ -111,31 +114,7 @@ if (marketplaceEntry?.policy?.installation !== 'INSTALLED_BY_DEFAULT'
   || marketplaceEntry?.policy?.authentication !== 'ON_INSTALL') {
   hits.push('repo plugin marketplace does not default-install with explicit authentication policy');
 }
-const operatorSkill = readFileSync(join(root, 'plugins', 'lineage-codex-plugin', 'skills', 'lineage-package-operator', 'SKILL.md'), 'utf8');
-if (operatorSkill.split('\n').some(line => {
-  const command = line.trim();
-  return /^(lineage-|npm run lineage:dev)/.test(command)
-    && command.includes('--db')
-    && command.includes('--confirm-write');
-})) hits.push('plugin operator skill contains a direct-database confirmed-write example');
-for (const required of [
-  'runtime doctor --json',
-  'profile doctor --profile',
-  'db info --profile',
-  'agent heartbeat --profile',
-  'agent release --profile',
-  'link-child --profile',
-  'profile clone --source-db',
-  'profile clone-assets --source-asset-root',
-  'profile repin-runtime',
-  'profile upgrade-runtime',
-  '--checkout-root',
-  'make repin-dev',
-  'make upgrade-prod',
-  'lineage-stable-service',
-]) {
-  if (!operatorSkill.includes(required)) hits.push(`plugin operator skill is missing ${required}`);
-}
+hits.push(...inspectPluginGuidance(join(root, 'plugins', 'lineage-codex-plugin')).failures);
 
 if (hits.length > 0) {
   console.error(hits.join('\n'));

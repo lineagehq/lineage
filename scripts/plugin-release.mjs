@@ -7,6 +7,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { comparePluginGuidance, inspectPluginGuidance } from './plugin-guidance.mjs';
+
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const args = process.argv.slice(2);
 const json = args.includes('--json');
@@ -35,46 +37,13 @@ try {
   const lineagePackage = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
   const pluginPackage = JSON.parse(readFileSync(join(root, 'plugins', 'lineage-codex-plugin', 'package.json'), 'utf8'));
   const manifest = JSON.parse(readFileSync(join(root, 'plugins', 'lineage-codex-plugin', '.codex-plugin', 'plugin.json'), 'utf8'));
-  const skillPath = join(root, 'plugins', 'lineage-codex-plugin', 'skills', 'lineage-package-operator', 'SKILL.md');
-  const skill = readFileSync(skillPath, 'utf8');
-  const failures = [];
+  const guidance = inspectPluginGuidance(join(root, 'plugins', 'lineage-codex-plugin'));
+  const failures = [...guidance.failures];
   if (pluginPackage.version !== lineagePackage.version) failures.push(`plugin package ${pluginPackage.version} != Lineage ${lineagePackage.version}`);
   if (manifest.version !== lineagePackage.version) failures.push(`plugin manifest ${manifest.version} != Lineage ${lineagePackage.version}`);
   if (manifest.lineage?.package !== lineagePackage.name || manifest.lineage?.version !== lineagePackage.version) {
     failures.push('plugin lineage compatibility metadata does not exactly match the root package');
   }
-  for (const required of [
-    'lineage-stable runtime doctor --json',
-    'profile doctor --profile',
-    'db info --profile',
-    'LINEAGE_PROD_PROFILE',
-    'LINEAGE_PREVIEW_PROFILE',
-    'LINEAGE_DEV_PROFILE',
-    'agent heartbeat --profile',
-    'agent release --profile',
-    'link-child --profile',
-    'profile clone --source-db',
-    'profile clone-assets --source-asset-root',
-    'profile repin-runtime',
-    'profile upgrade-runtime',
-    '--checkout-root',
-    'make repin-dev',
-    'make upgrade-prod',
-    'lineage-stable-service',
-    'Legacy-unbound access is diagnostic/read-only',
-  ]) {
-    if (!skill.includes(required)) failures.push(`operator skill is missing required guidance: ${required}`);
-  }
-  for (const forbidden of ['npm install -g @mean-weasel/lineage', 'npx @mean-weasel/lineage', 'make start-local-prod', 'fall back to PID/log files']) {
-    if (skill.includes(forbidden)) failures.push(`operator skill contains unsafe/stale guidance: ${forbidden}`);
-  }
-  const unsafeWriteExample = skill.split('\n').some(line => {
-    const command = line.trim();
-    return /^(lineage-|npm run lineage:dev)/.test(command)
-      && command.includes('--db')
-      && command.includes('--confirm-write');
-  });
-  if (unsafeWriteExample) failures.push('operator skill contains a direct-database confirmed-write example');
   if (failures.length > 0) throw new Error(failures.join('\n'));
 
   const packed = JSON.parse(run(process.execPath, [
@@ -84,6 +53,9 @@ try {
     '--out-dir', outDir,
     '--json',
   ]));
+  for (const path of guidance.files.keys()) {
+    if (!packed.files.includes(path)) throw new Error(`plugin artifact is missing guidance: ${path}`);
+  }
   const artifact = packed.artifactPath;
   const checksumFile = `${artifact}.sha256`;
   if (!existsSync(artifact) || !existsSync(checksumFile)) throw new Error('plugin pack did not produce artifact and checksum');
@@ -101,10 +73,15 @@ try {
   ]));
   const installedRoot = join(target, manifest.name);
   const installedManifest = JSON.parse(readFileSync(join(installedRoot, '.codex-plugin', 'plugin.json'), 'utf8'));
-  const installedSkill = readFileSync(join(installedRoot, 'skills', 'lineage-package-operator', 'SKILL.md'), 'utf8');
-  if (installedManifest.version !== lineagePackage.version || installedSkill !== skill) {
-    throw new Error('installed plugin tree does not exactly match the version-locked source skill');
+  const installedGuidance = inspectPluginGuidance(installedRoot);
+  const installedFailures = [
+    ...installedGuidance.failures,
+    ...comparePluginGuidance(guidance.files, installedGuidance.files),
+  ];
+  if (installedManifest.version !== lineagePackage.version) {
+    installedFailures.push('installed plugin version does not match the source');
   }
+  if (installedFailures.length > 0) throw new Error(installedFailures.join('\n'));
 
   const result = {
     artifact: requestedOut ? artifact : packed.artifactName,

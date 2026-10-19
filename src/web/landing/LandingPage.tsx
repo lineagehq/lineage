@@ -187,7 +187,11 @@ export function LandingPage() {
           <span>LINEAGE</span>
         </a>
         <p>The shared visual workspace for humans and agents.</p>
-        <a href="https://github.com/mean-weasel/lineage" rel="noreferrer" target="_blank">GitHub <ArrowDownRight aria-hidden="true" size={14} /></a>
+        <nav aria-label="More from Jeremy Watt" style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", gap: "1rem", fontSize: "14px" }}>
+          <a href="https://neonwatty.com/projects/">All projects</a>
+          <a href="https://neonwatty.com/posts/">Blog</a>
+          <a href="https://github.com/lineagehq/lineage" rel="noreferrer" target="_blank">GitHub</a>
+        </nav>
       </footer>
     </div>
   );
